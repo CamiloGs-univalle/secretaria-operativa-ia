@@ -13,9 +13,7 @@ export default async function handler(req, res){
   try{
     const { id } = req.body || {}
     if(!id){ res.status(400).json({ error:'missing_id' }); return }
-    // Nombre de acción a verificar en el dashboard de Composio (API Playground
-    // de la acción de Gmail para quitar/añadir labels) — puede variar.
-    await ejecutarAccionGmail({ action:'GMAIL_REMOVE_LABEL', params:{ message_id:id, label_ids:['INBOX','UNREAD'] }, connectedAccountId: session.connectedAccountId })
+    await ejecutarAccionGmail({ action:'GMAIL_REMOVE_LABEL', params:{ message_id:id, label_ids:['INBOX','UNREAD'] }, connectedAccountId: session.connectedAccountId, entityId: session.email })
     res.status(200).json({ ok:true })
   }catch(e){
     console.error('[gmail/archive]', e.message)
