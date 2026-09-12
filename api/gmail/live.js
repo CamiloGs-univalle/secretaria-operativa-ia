@@ -17,7 +17,8 @@ export default async function handler(req, res){
       const j = await ejecutarAccionGmail({
         action: 'GMAIL_FETCH_EMAILS',
         params: { max_results: max, query: q || undefined },
-        connectedAccountId: session.connectedAccountId
+        connectedAccountId: session.connectedAccountId,
+        entityId: session.email
       })
       const raw = j.data?.messages || j.messages || j.data?.response_data?.messages || []
       if(Array.isArray(raw) && raw.length){

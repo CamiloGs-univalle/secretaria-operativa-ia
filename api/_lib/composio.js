@@ -45,16 +45,23 @@ export async function estadoConexion(connectedAccountId){
 }
 
 // Ejecuta una acción del toolkit gmail para la cuenta conectada de una
-// persona específica (mismo endpoint/estilo que ya usa send.js, solo que
-// ahora aceptando a qué cuenta conectada aplica — antes siempre usaba la
-// cuenta por defecto).
-export async function ejecutarAccionGmail({ action, params, connectedAccountId }){
-  const body = { toolkit: 'gmail', action, params }
-  if(connectedAccountId) body.connectedAccountId = connectedAccountId
-  const r = await fetch(`${V2}/actions/execute`, {
+// persona específica — v3.1 (v2 está deprecado 410).
+// Requiere entity_id = email del usuario que conectó su Gmail.
+export async function ejecutarAccionGmail({ action, params, connectedAccountId, entityId }){
+  // Normaliza params para v3.1: GMAIL_SEND_EMAIL espera recipient_email, no `to`
+  let args = { ...params }
+  if(args.to && !args.recipient_email) { args.recipient_email = args.to; delete args.to }
+  // threadId -> para reply usar GMAIL_REPLY_TO_THREAD si existe threadId
+  const tool = action
+  const payload = {
+    arguments: args,
+  }
+  if(connectedAccountId) payload.connected_account_id = connectedAccountId
+  if(entityId) payload.entity_id = entityId
+  const r = await fetch(`${V3}/tools/execute/${tool}`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify(body)
+    body: JSON.stringify(payload)
   })
   const j = await r.json().catch(()=>({}))
   if(!r.ok) throw new Error('composio_action_failed: ' + JSON.stringify(j))

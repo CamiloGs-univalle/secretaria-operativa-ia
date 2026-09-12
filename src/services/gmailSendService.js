@@ -9,11 +9,16 @@ export async function enviarCorreo({ to, subject, body, threadId = null }){
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify({ to, subject, body, threadId })
     })
+    const j = await r.json().catch(()=>({}))
     if(r.ok){
-      const j = await r.json()
-      return { ok:true, id: j.id || j.messageId, via:'gmail-api' }
+      return { ok:true, id: j.id || j.messageId || j?.data?.messageId, via: j.via || 'gmail-api', warning: j.warning }
+    } else {
+      throw new Error(j.error || `Error ${r.status}: ${JSON.stringify(j).slice(0,120)}`)
     }
-  }catch(e){ /* fallback */ }
+  }catch(e){
+    console.error('[GmailSend] backend no disponible o error, fallback simulado:', e.message)
+    // Fallback demo: guarda local y avisa que necesita conectar Google para envío real
+  }
 
   // Fallback: simula envío y registra en auditoría local (para demo sin OAuth)
   // En producción esto NO se usa — Action Guard exige confirmación y Gmail API real

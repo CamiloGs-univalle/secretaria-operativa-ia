@@ -15,13 +15,19 @@ export default async function handler(req, res){
   const allowed = true // en prod validar contra lista blanca / reglas
   if(!allowed) return res.status(403).json({error:'Action Guard bloqueó envío'})
 
-  // 0) NUEVO: si esta persona conectó su propio Gmail (login real vía
+   // 0) NUEVO: si esta persona conectó su propio Gmail (login real vía
   // Composio), enviar desde SU cuenta — no la fija de antes.
   const session = getSession(req)
   if(session?.connectedAccountId){
     try{
-      const j = await ejecutarAccionGmail({ action:'GMAIL_SEND_EMAIL', params:{ to, subject, body, threadId }, connectedAccountId: session.connectedAccountId })
-      return res.json({ ok:true, id: j.data?.messageId || j.id, via:'composio-usuario' })
+      // Si hay threadId es un reply — usar herramienta de reply
+      const tool = threadId ? 'GMAIL_REPLY_TO_THREAD' : 'GMAIL_SEND_EMAIL'
+      const params = tool === 'GMAIL_REPLY_TO_THREAD'
+        ? { thread_id: threadId, recipient_email: to, subject, body }
+        : { recipient_email: to, subject, body }
+      const j = await ejecutarAccionGmail({ action: tool, params, connectedAccountId: session.connectedAccountId, entityId: session.email })
+      const data = j.data || j
+      return res.json({ ok:true, id: data?.messageId || data?.id || data?.response_data?.id, via:'composio-usuario' })
     }catch(e){ console.error('[gmail/send] Composio por-usuario falló, sigue con el flujo normal:', e.message) }
   }
 
@@ -51,20 +57,16 @@ export default async function handler(req, res){
     }
   }
 
-  // 2) Fallback Composio (si hay COMPOSIO_API_KEY)
+  // 2) Fallback Composio (si hay COMPOSIO_API_KEY) — usa v3.1
   if(process.env.COMPOSIO_API_KEY){
     try{
-      const r = await fetch('https://backend.composio.dev/api/v2/actions/execute', {
-        method:'POST',
-        headers:{ 'x-api-key': process.env.COMPOSIO_API_KEY, 'Content-Type':'application/json' },
-        body: JSON.stringify({
-          toolkit:'gmail',
-          action:'GMAIL_SEND_EMAIL',
-          params:{ to, subject, body, threadId }
-        })
-      })
-      const j = await r.json()
-      if(r.ok) return res.json({ ok:true, id: j.data?.messageId || j.id, via:'composio' })
+      const tool = threadId ? 'GMAIL_REPLY_TO_THREAD' : 'GMAIL_SEND_EMAIL'
+      const params = tool === 'GMAIL_REPLY_TO_THREAD'
+        ? { thread_id: threadId, recipient_email: to, subject, body }
+        : { recipient_email: to, subject, body }
+      const j = await ejecutarAccionGmail({ action: tool, params })
+      const data = j.data || j
+      if(data) return res.json({ ok:true, id: data?.messageId || data?.id || data?.response_data?.id, via:'composio' })
     }catch(e){ console.error('Composio error', e.message) }
   }
 
