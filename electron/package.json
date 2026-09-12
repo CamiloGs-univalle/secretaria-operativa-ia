@@ -3,11 +3,56 @@
   "version": "1.0.0",
   "description": "Mascota de escritorio — Secretaria Operativa IA (Electron)",
   "main": "main.js",
+  "author": "Proservis TI <auxiliar.ti@proservis.com.co>",
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev"
+    "dev": "electron . --dev",
+    "build:win": "electron-builder --win --x64 --publish=never",
+    "build:dir": "electron-builder --dir --publish=never"
   },
   "dependencies": {
     "electron-store": "^8.1.0"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
+    "electron-packager": "^17.1.2"
+  },
+  "build": {
+    "appId": "com.proservis.mascotasecretaria",
+    "productName": "Mascota Secretaria IA",
+    "directories": {
+      "output": "dist-installer",
+      "buildResources": "."
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "../dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../dist",
+        "to": "dist"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    }
   }
 }

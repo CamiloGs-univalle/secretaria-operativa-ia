@@ -214,3 +214,45 @@ export function filtrarCorreosIrrelevantes(correos){
     return k.tipo!==CATEGORIAS.NO_RELEVANTE
   })
 }
+
+// Sugerencia de respuesta con contexto completo (15 preguntas + hilo)
+export function sugerirRespuesta(correo, analisis, proceso=null, hilo=[]){
+  const nombreRemitente = (correo.remitente||'').split('<')[0].trim().split(' ')[0] || 'buen día'
+  const esSolicitud = analisis.clasificacion.tipo==='SOLICITUD' || analisis.clasificacion.tipo==='URGENTE'
+  const esIncidencia = analisis.incidencia.existe
+  const esReprogram = analisis.clasificacion.tipo==='REPROGRAMACION'
+  const checklist = analisis.respuesta.checklist || []
+  const fechaLim = analisis.fechas.fechaCalculada
+  let asunto = correo.asunto.startsWith('Re:')||correo.asunto.startsWith('RE:') ? correo.asunto : `Re: ${correo.asunto}`
+  let cuerpo = ''
+  let tono = 'profesional y cordial'
+
+  if(esIncidencia){
+    cuerpo = `Hola ${nombreRemitente},\n\nGracias por informar la incidencia.\n\nHe tomado nota de: "${analisis.incidencia.descripcion?.slice(0,120)}"\nQuedo atenta a la solución y al nuevo compromiso${fechaLim? ` para el ${fechaLim}`:''}.\n${proceso? `Proceso: ${proceso.id} — ${proceso.titulo}. `:''}¿Podrías confirmarme la nueva fecha y el responsable?\n\nQuedo atenta,\nCoordinación — Proservis\n`
+  } else if(esReprogram){
+    cuerpo = `Hola ${nombreRemitente},\n\nEntendido el cambio de fecha${fechaLim? ` al ${fechaLim}`:''}.\nHe actualizado el proceso${proceso? ` ${proceso.id}`:''} y ajustado el seguimiento.\nConfirmo que quedamos para ${fechaLim || 'la nueva fecha'}.\n\nSi hay impacto adicional me avisas por favor.\n\nCordial saludo,\nCoordinación — Proservis\n`
+  } else if(esSolicitud){
+    const pendientes = checklist.filter(c=>!c.done).map(c=>`• ${c.q}`).join('\n')
+    cuerpo = `Hola ${nombreRemitente},\n\nGracias por tu correo.\n\n` +
+      (checklist.length? `Para responder necesito verificar:\n${pendientes}\n\n`:'') +
+      (fechaLim? `Entiendo el compromiso para ${fechaLim}. `:'' ) +
+      `Te confirmo en el transcurso del día con la información completa.\n\n`+
+      (proceso? `Referencia: ${proceso.id}\n`:'') +
+      `Quedo atenta,\nCoordinación — Proservis\nAuxiliar TI • auxiliar.ti@proservis.com.co`
+  } else if(analisis.clasificacion.tipo==='SEGUIMIENTO'){
+    cuerpo = `Hola ${nombreRemitente},\n\nGracias por el seguimiento.\nEn este momento ${analisis.turno.accionEsperadaDe==='COORDINADORA' ? 'estoy finalizando la gestión y te envío actualización hoy' : 'estamos a la espera de respuesta externa y haré seguimiento' }.\nTe confirmo en breve.\n\nSaludos,\nCoordinación\n`
+  } else if(analisis.finalizacion.posibleFinalizacion){
+    cuerpo = `Hola ${nombreRemitente},\n\nPerfecto, gracias por confirmar.\nHe marcado el proceso como posible cierre${proceso? ` (${proceso.id})`:''}. Quedo atenta si surge algo adicional.\n\nSaludos cordiales,\nCoordinación\n`
+  } else {
+    cuerpo = `Hola ${nombreRemitente},\n\nGracias por tu mensaje.\nHe recibido tu correo "${correo.asunto.slice(0,60)}" y lo tengo en seguimiento.\nTe respondo con detalle en breve.\n\nCordial saludo,\nCoordinación — Proservis\n`
+  }
+
+  // hilo contexto (últimos 2 correos del hilo)
+  let contextoHilo = ''
+  if(hilo.length>1){
+    const ult = hilo.slice(-2).map(h=> `${h.remitente.split('<')[0].trim()}: ${h.cuerpo.slice(0,90)}…`).join('\n')
+    contextoHilo = `\n\n— Contexto hilo —\n${ult}`
+  }
+
+  return { asunto, cuerpo: cuerpo.trim(), tono, checklist, contextoHilo, confianza: analisis.confianza, requiereConfirmacion: true }
+}
