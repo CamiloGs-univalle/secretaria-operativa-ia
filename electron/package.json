@@ -1,0 +1,13 @@
+{
+  "name": "mascota-secretaria-ia",
+  "version": "1.0.0",
+  "description": "Mascota de escritorio — Secretaria Operativa IA (Electron)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "dependencies": {
+    "electron-store": "^8.1.0"
+  }
+}
