@@ -1,8 +1,9 @@
 import { useState, useEffect, useMemo } from 'react'
 import { getProcesos, updateProceso, audit } from './data/mockFirebase.js'
-import { analizarCorreoCompleto } from './engine/emailEngine.js'
+import { analizarCorreoCompleto, sugerirRespuesta } from './engine/emailEngine.js'
 import { fetchRealGmail, GMAIL_META } from './services/gmailService.js'
 import { generarProcesosDesdeCorreos } from './services/processGenerator.js'
+import { responderHilo } from './services/gmailSendService.js'
 import './App.css'
 
 function Pill({children, color}){ return <span className={`pill pill-${color}`}>{children}</span> }
@@ -25,7 +26,9 @@ export default function App(){
   const [showNotif,setShowNotif]=useState(true)
   const [syncing,setSyncing]=useState(false)
   const [toast,setToast]=useState('')
-  const showToast=(m)=>{ setToast(m); setTimeout(()=>setToast(''),3000)}
+  const showToast=(m)=>{ setToast(m); setTimeout(()=>setToast(''),3500)}
+  const [reply,setReply]=useState(null) // {correo, analisis, proceso, sugerencia, asunto, cuerpo}
+  const [sending,setSending]=useState(false)
 
   useEffect(()=>{
     (async()=>{
@@ -101,6 +104,24 @@ export default function App(){
   function marcarCerrado(id){ updateProceso(id,{estado:'CERRADO',fechaCierre:new Date().toISOString()}); refresh(); showToast(`${id} cerrado`); setMascotaLog(l=>[...l,{t:'ahora',m:`${id} cerrado Señor. ¡Excelente!`}])}
   function marcarLeido(id){ setCorreos(c=>c.map(x=> x.id===id? {...x, etiquetas: x.etiquetas.filter(l=>l!=='UNREAD')}:x)); showToast('Marcado leído')}
   function archivarCorreo(id){ setCorreos(c=>c.filter(x=>x.id!==id)); showToast('Archivado — inbox más limpio')}
+  function abrirResponder(correo){
+    const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null)
+    const proc = procesos.find(p=> p.correos?.includes(correo.id) || p.hiloId===correo.hiloId) || null
+    const hilo = correos.filter(c=> c.hiloId===correo.hiloId).sort((x,y)=> new Date(x.fecha)-new Date(y.fecha))
+    const sug = sugerirRespuesta(correo, a, proc, hilo)
+    setReply({ correo, analisis:a, proceso:proc, sugerencia:sug, asunto: sug.asunto, cuerpo: sug.cuerpo })
+  }
+  async function enviarRespuesta(){
+    if(!reply) return
+    if(!confirm(`¿Enviar respuesta a ${reply.correo.remitente.split('<')[0].trim()}?\n\nAsunto: ${reply.asunto}\n\nAction Guard: se registrará en auditoría.`)) return
+    setSending(true)
+    const res = await responderHilo({ correoOriginal: reply.correo, subject: reply.asunto, body: reply.cuerpo })
+    audit('enviar_respuesta', { to: reply.correo.remitente, subject: reply.asunto, threadId: reply.correo.hiloId, via: res.via, id: res.id })
+    setSending(false); setReply(null); showToast(res.via==='gmail-api' ? '✉️ Respuesta enviada por Gmail REAL' : '✉️ Respuesta registrada (simulado — configure OAuth para envío real)')
+    setMascotaLog(l=>[...l,{t:new Date().toLocaleTimeString().slice(0,5), m:`Respuesta enviada a ${reply.correo.remitente.split('<')[0].trim()} — hilo ${reply.correo.hiloId.slice(0,8)}`}])
+    // marcar como respondido: actualizar proceso
+    if(reply.proceso) { updateProceso(reply.proceso.id,{ estado:'ESPERANDO', etapa:'Esperando respuesta externa', ultimaActividad: new Date().toISOString() }); setProcesos(getProcesos()) }
+  }
 
   return (
     <div className="app">
@@ -211,7 +232,7 @@ export default function App(){
                           <td><Pill color={a.clasificacion.tipo==='SOLICITUD'?'blue':a.clasificacion.tipo==='INCIDENCIA'?'red':a.clasificacion.tipo==='URGENTE'?'red':'gray'}>{a.clasificacion.tipo}</Pill><div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{a.relevancia.score}% relev.</div></td>
                           <td style={{fontSize:12}}>{a.turno.accionEsperadaDe==='COORDINADORA'?<b style={{color:'#dc2626'}}>TÚ</b>:<span style={{color:'#0891b2'}}>Externo</span>}<div style={{fontSize:11,color:'var(--muted)'}}>{a.turno.tipoRespuesta}</div></td>
                           <td><PrioridadDot n={a.prioridad.nivel}/><small style={{marginLeft:6,fontWeight:700}}>{a.prioridad.nivel}</small><div style={{fontSize:11,color:'var(--muted)'}}>{a.prioridad.score}/100</div></td>
-                          <td><div style={{display:'flex',gap:6}}><button className="btn sm" onClick={()=>{ const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){ setSel(p); setTab('procesos')} else showToast('Sin proceso — correo informativo')}}>Ver</button><button className="btn sm ghost" onClick={()=>archivarCorreo(correo.id)}>Archivar</button></div></td>
+                          <td><div style={{display:'flex',gap:6,flexWrap:'wrap'}}><button className="btn sm primary" onClick={()=>abrirResponder(correo)}>Responder IA</button><button className="btn sm" onClick={()=>{ const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){ setSel(p); setTab('procesos')} else showToast('Sin proceso — correo informativo')}}>Ver</button><button className="btn sm ghost" onClick={()=>archivarCorreo(correo.id)}>Archivar</button></div></td>
                         </tr>
                       ))}
                     </tbody>
@@ -268,8 +289,9 @@ export default function App(){
                         </div>
                       </div>
                       <div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'flex-end'}}>
-                        <div style={{display:'flex',gap:6}}>
-                          <button className="btn sm primary" onClick={()=>{ const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){setSel(p); setTab('procesos')} else { const h=procesos.find(x=>x.hiloId===correo.hiloId); if(h){setSel(h); setTab('procesos')} else showToast('Correo informativo — no genera proceso')}}}>Ver proceso</button>
+                        <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                          <button className="btn sm primary" onClick={()=>abrirResponder(correo)}>↩ Responder IA</button>
+                          <button className="btn sm" onClick={()=>{ const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){setSel(p); setTab('procesos')} else { const h=procesos.find(x=>x.hiloId===correo.hiloId); if(h){setSel(h); setTab('procesos')} else showToast('Correo informativo — no genera proceso')}}}>Ver proceso</button>
                           <button className="btn sm" onClick={()=>marcarLeido(correo.id)}>Leído</button>
                           <button className="btn sm ghost" onClick={()=>archivarCorreo(correo.id)}>Archivar</button>
                         </div>
@@ -449,7 +471,47 @@ export default function App(){
           )}
         </aside>
       </div>
-      <footer style={{textAlign:'center',padding:'16px 0 24px',fontSize:11,color:'var(--muted)'}} className="mono">MVP 1 • Gmail REAL → IA → Firebase → Web • Inbox ordenado • Desplegable en Vercel • {new Date().toLocaleDateString()}</footer>
+      {reply && (
+        <div className="reply-overlay" onClick={()=>!sending && setReply(null)}>
+          <div className="reply-modal" onClick={e=>e.stopPropagation()}>
+            <div className="reply-head">
+              <div>
+                <h3>↩ Responder — con contexto IA</h3>
+                <div className="mono" style={{fontSize:11,color:'var(--muted)',marginTop:2}}>Hilo {reply.correo.hiloId.slice(0,8)} • {reply.analisis.prioridad.nivel} {reply.analisis.prioridad.score}/100 • conf {Math.round(reply.analisis.confianza*100)}% • {reply.sugerencia.tono}</div>
+              </div>
+              <button className="btn sm ghost" onClick={()=>setReply(null)}>✕</button>
+            </div>
+            <div className="reply-body">
+              <div className="reply-context">
+                <b style={{fontSize:11,textTransform:'uppercase',letterSpacing:0.5}}>Contexto detectado por IA</b>
+                <div style={{marginTop:6,display:'flex',gap:6,flexWrap:'wrap'}}>
+                  <Pill color={reply.analisis.clasificacion.tipo==='URGENTE'?'red':'blue'}>{reply.analisis.clasificacion.tipo}</Pill>
+                  <Pill color={reply.analisis.turno.accionEsperadaDe==='COORDINADORA'?'red':'cyan'}>Turno: {reply.analisis.turno.accionEsperadaDe}</Pill>
+                  <Pill color="gray">{reply.analisis.fechas.fechaCalculada? `Vence ${reply.analisis.fechas.fechaCalculada}`:'Sin fecha'}</Pill>
+                </div>
+                <div style={{marginTop:8,color:'var(--muted)'}}><b>Qué esperan:</b> {reply.analisis.accion.accionEsperada}</div>
+                {reply.sugerencia.checklist.length>0 && <div style={{marginTop:6}}><b>Checklist:</b> {reply.sugerencia.checklist.map(c=>c.q).join(' • ')}</div>}
+                {reply.proceso && <div style={{marginTop:6}}><b>Proceso:</b> {reply.proceso.id} — {reply.proceso.titulo.slice(0,60)}</div>}
+              </div>
+              <div className="reply-field"><label>Para</label><input value={reply.correo.remitente} readOnly style={{background:'var(--bg2)',color:'var(--muted)'}} /></div>
+              <div className="reply-field"><label>Asunto</label><input value={reply.asunto} onChange={e=>setReply(r=>({...r, asunto:e.target.value}))} /></div>
+              <div className="reply-field"><label>Mensaje sugerido por IA — editable</label><textarea value={reply.cuerpo} onChange={e=>setReply(r=>({...r, cuerpo:e.target.value}))} rows={12} /></div>
+              <div style={{fontSize:11,color:'var(--muted)',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,padding:10}}>
+                💡 <b>Sugerencia IA:</b> El tono es {reply.sugerencia.tono}. La IA ya consideró el hilo completo ({reply.correo.hiloId.slice(0,8)}) y el checklist. Puedes editar antes de enviar. <b>Action Guard:</b> requiere confirmación antes de enviar a externo.
+              </div>
+            </div>
+            <div className="reply-actions">
+              <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Gmail REAL • {reply.correo.remitente.split('<')[0].trim()} • via {GMAIL_META.account}</span>
+              <div style={{display:'flex',gap:8}}>
+                <button className="btn ghost" onClick={()=>setReply(null)} disabled={sending}>Cancelar</button>
+                <button className="btn primary" onClick={enviarRespuesta} disabled={sending || !reply.cuerpo.trim()}>{sending?'Enviando…':'Enviar respuesta →'}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <footer style={{textAlign:'center',padding:'16px 0 24px',fontSize:11,color:'var(--muted)'}} className="mono">MVP 1 • Gmail REAL → IA → Firebase → Web • Responder con contexto • Inbox ordenado • {new Date().toLocaleDateString()}</footer>
     </div>
   )
 }
