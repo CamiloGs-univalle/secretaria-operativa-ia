@@ -72,3 +72,7 @@ export function audit(action, extra={}){
   logs.unshift({fecha:new Date().toISOString(), usuario:'Coordinadora', accion:action, ...extra})
   localStorage.setItem('soia_audit', JSON.stringify(logs.slice(0,200)))
 }
+// Devuelve el historial REAL de acciones (lo que de verdad se hizo), no un ejemplo fijo.
+export function getAuditLog(){
+  try{ return JSON.parse(localStorage.getItem('soia_audit')||'[]') }catch{ return [] }
+}

@@ -10,6 +10,13 @@ export function generarProcesosDesdeCorreos(correos, procesosExistentes=[]){
   })
   const procesos = [...procesosExistentes]
   const emailToProceso = {}
+  // Contador de folio: siempre por encima del máximo ID existente (mock + generados),
+  // así nunca choca con un PROC-XXXXX que ya exista (antes se usaba procesos.length+182,
+  // que sí podía repetir un ID del set semilla — por eso salían procesos duplicados).
+  let siguienteFolio = 1 + procesos.reduce((max,p)=>{
+    const n = parseInt(String(p.id).replace(/\D/g,''),10)
+    return Number.isFinite(n) && n>max ? n : max
+  }, 181)
 
   Object.entries(porHilo).forEach(([hiloId, msgs])=>{
     // ordenar por fecha
@@ -33,8 +40,8 @@ export function generarProcesosDesdeCorreos(correos, procesosExistentes=[]){
       return
     }
 
-    // crear nuevo proceso desde correo real
-    const id = `PROC-${String(procesos.length+182).padStart(5,'0')}`
+    // crear nuevo proceso desde correo real — folio único, nunca choca con uno existente
+    const id = `PROC-${String(siguienteFolio++).padStart(5,'0')}`
     const titulo = principal.asunto.slice(0,65) || `Proceso ${hiloId.slice(0,6)}`
     const nuevo = {
       id, hiloId,

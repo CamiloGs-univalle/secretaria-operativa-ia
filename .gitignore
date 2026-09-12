@@ -10,3 +10,4 @@ electron/dist
 electron/dist-packager
 electron/dist-installer
 electron/node_modules
+.env*
