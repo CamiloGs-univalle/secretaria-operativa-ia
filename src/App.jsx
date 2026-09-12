@@ -4,6 +4,10 @@ import { analizarCorreoCompleto, sugerirRespuesta } from './engine/emailEngine.j
 import { fetchRealGmail, GMAIL_META } from './services/gmailService.js'
 import { generarProcesosDesdeCorreos } from './services/processGenerator.js'
 import { responderHilo } from './services/gmailSendService.js'
+import Mascota from './components/Mascota.jsx'
+import LoginScreen from './components/LoginScreen.jsx'
+import { Donut, HBarList } from './components/Charts.jsx'
+import { getDemoUser, setDemoUser, clearDemoUser, fetchRealSession, logoutReal, iniciales } from './services/authService.js'
 import './App.css'
 
 function Pill({children, color}){ return <span className={`pill pill-${color}`}>{children}</span> }
@@ -37,6 +41,53 @@ function explicarTurno(a){
 export default function App(){
   const [theme,setTheme]=useState(()=> localStorage.getItem('soia_theme')||'light')
   useEffect(()=>{ document.documentElement.setAttribute('data-theme',theme); localStorage.setItem('soia_theme',theme)},[theme])
+
+  // Sesión — cualquier persona puede entrar con su propio correo:
+  // undefined = verificando • null = sin sesión → LoginScreen • objeto = activa
+  const [session,setSession]=useState(undefined)
+  const [loginStatus,setLoginStatus]=useState(()=> new URLSearchParams(window.location.search).get('login'))
+  const [composioConfigured,setComposioConfigured]=useState(false)
+  const [menuOpen,setMenuOpen]=useState(false)
+
+  useEffect(()=>{
+    if(!loginStatus) return
+    const url = new URL(window.location.href)
+    url.searchParams.delete('login')
+    window.history.replaceState({}, '', url.pathname + (url.search||''))
+  },[loginStatus])
+
+  useEffect(()=>{
+    (async()=>{
+      const real = await fetchRealSession()
+      if(real){ setSession({ nombre: real.name || real.email, email: real.email, real:true }); return }
+      const demo = getDemoUser()
+      setSession(demo ? { ...demo, real:false } : null)
+    })()
+  },[])
+
+  useEffect(()=>{
+    fetch('/api/auth/config').then(r=>r.json()).then(j=>setComposioConfigured(!!j.composioConfigured)).catch(()=>{})
+  },[])
+
+  useEffect(()=>{
+    if(!menuOpen) return
+    const onClick=(e)=>{ if(!e.target.closest?.('.user-menu')) setMenuOpen(false) }
+    document.addEventListener('click', onClick)
+    return ()=>document.removeEventListener('click', onClick)
+  },[menuOpen])
+
+  function handleDemoLogin({name,email}){
+    const u = { nombre:name, email, real:false }
+    setDemoUser(u); setSession(u); showToast(`👋 Bienvenida, ${name.split(' ')[0]} — modo demostración`)
+  }
+  function handleRealConnect({name,email}){
+    window.location.href = `/api/auth/composio/start?email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`
+  }
+  async function handleLogout(){
+    if(session?.real) await logoutReal(); else clearDemoUser()
+    setSession(null); setMenuOpen(false); showToast('Sesión cerrada')
+  }
+
   const [procesos,setProcesos]=useState(()=>getProcesos())
   const [correos,setCorreos]=useState([])
   const [loading,setLoading]=useState(true)
@@ -85,6 +136,24 @@ export default function App(){
     const total=procesos.length
     const hoy=procesos.filter(p=>p.fechaLimite===new Date().toISOString().slice(0,10)).length
     return {crit,alta,enProc,esperando,venc,total,hoy}
+  },[procesos])
+
+  // Métricas del dashboard — siempre calculadas de los procesos/correos reales
+  // de esta sesión, nunca cifras inventadas.
+  const metricas=useMemo(()=>{
+    const total=procesos.length
+    const cerrados=procesos.filter(p=>['CERRADO','COMPLETADO'].includes(p.estado)).length
+    const aTiempo=procesos.filter(p=>!(p.estado==='VENCIDO'||p.retraso>0)).length
+    const diasProm= total? procesos.reduce((s,p)=>s+(p.tiempoTranscurrido||0),0)/total : 0
+    const porArea={}
+    procesos.forEach(p=>{ porArea[p.area]=(porArea[p.area]||0)+1 })
+    const areaData=Object.entries(porArea).sort((a,b)=>b[1]-a[1]).slice(0,6).map(([label,value])=>({label,value}))
+    const incActivas=procesos.filter(p=>p.incidencias?.length).length
+    return {
+      total, cerrados, aTiempo, diasProm, areaData, incActivas,
+      pctCerrados: total? Math.round(cerrados/total*100):0,
+      pctATiempo: total? Math.round(aTiempo/total*100):0,
+    }
   },[procesos])
 
   const recomendaciones=useMemo(()=>{
@@ -145,6 +214,57 @@ export default function App(){
     if(reply.proceso) { updateProceso(reply.proceso.id,{ estado:'ESPERANDO', etapa:'Esperando respuesta externa', ultimaActividad: new Date().toISOString() }); setProcesos(getProcesos()) }
   }
 
+  // Handler central de la Mascota — ejecuta acciones naturales (sec 22) con Action Guard (sec 23)
+  function handleMascotaAction({ type, proceso, correo, destinatario, fecha }){
+    if(!proceso && type!=='REENVIAR') return
+    const nowIso = new Date().toISOString()
+    if(type==='COMPLETAR'){
+      updateProceso(proceso.id,{ estado:'COMPLETADO', etapa:'Posible finalización', ultimaActividad: nowIso,
+        historial: [...(proceso.historial||[]), { fecha: nowIso.slice(0,10), icon:'🟢', texto:'Mascota: posible finalización detectada' }] })
+      setProcesos(getProcesos()); setSel(getProcesos().find(p=>p.id===proceso.id)||proceso); showToast('🟢 Posible finalización — confirme cierre')
+    } else if(type==='CERRAR'){
+      updateProceso(proceso.id,{ estado:'CERRADO', fechaCierre: nowIso, motivoCierre:'Confirmado por Coordinadora via Mascota', ultimaActividad: nowIso,
+        historial: [...(proceso.historial||[]), { fecha: nowIso.slice(0,10), icon:'✅', texto:'Proceso cerrado por Mascota (confirmado)' }] })
+      setProcesos(getProcesos()); showToast('✅ Proceso cerrado — auditoría registrada')
+    } else if(type==='REENVIAR'){
+      const targetCorreo = correo || (proceso?.correos?.length ? correos.find(c=>c.id===proceso.correos[0]) : null)
+      if(!targetCorreo){ showToast('Seleccione un correo para reenviar Señor'); return }
+      // Prepara borrador de reenvío
+      const fwdSubject = targetCorreo.asunto.startsWith('Fwd:') ? targetCorreo.asunto : `Fwd: ${targetCorreo.asunto}`
+      const fwdBody = `Hola ${destinatario},\n\nTe reenvío esta solicitud para tu gestión:\n\n---------- Mensaje original ----------\nDe: ${targetCorreo.remitente}\nAsunto: ${targetCorreo.asunto}\nFecha: ${targetCorreo.fecha}\n\n${targetCorreo.cuerpo}\n\nQuedo atenta a tu confirmación.\n\nCordial saludo,\nCoordinación — Proservis`
+      setReply({ correo: { ...targetCorreo, remitente: `${destinatario} <${destinatario.toLowerCase().replace(/\s+/g,'.')}@proservis.com.co>` }, analisis: analizarCorreoCompleto(targetCorreo, proceso), proceso, sugerencia:{ asunto:fwdSubject, cuerpo:fwdBody, checklist:[], tono:'profesional', confianza:0.92 }, asunto:fwdSubject, cuerpo:fwdBody })
+      showToast(`📨 Borrador de reenvío a ${destinatario} preparado — requiere confirmación`)
+    } else if(type==='REPROGRAMAR'){
+      const newDate = fecha?.iso || new Date(Date.now()+86400000).toISOString().slice(0,10)
+      updateProceso(proceso.id,{ fechaLimite: newDate, proximaAccion:`Reprogramado para ${fecha?.label||newDate}`, estado: proceso.estado==='VENCIDO'?'PENDIENTE':proceso.estado, ultimaActividad: nowIso,
+        historial: [...(proceso.historial||[]), { fecha: nowIso.slice(0,10), icon:'📅', texto:`Reprogramado para ${newDate} (Mascota)` }] })
+      setProcesos(getProcesos()); showToast(`📅 Reprogramado para ${newDate}`)
+    } else if(type==='SEGUIMIENTO'){
+      const fIso = fecha?.iso || new Date(Date.now()+ 2*86400000).toISOString().slice(0,10)
+      updateProceso(proceso.id,{ seguimientos: [...(proceso.seguimientos||[]), { fecha:fIso, nota:`Seguimiento programado ${fecha?.label||fIso} (Mascota)` }], proximaAccion:`Seguimiento ${fecha?.label||fIso}`, ultimaActividad: nowIso,
+        historial: [...(proceso.historial||[]), { fecha: nowIso.slice(0,10), icon:'🔔', texto:`Seguimiento agendado para ${fIso}` }] })
+      setProcesos(getProcesos()); showToast(`🔔 Seguimiento para ${fecha?.label||fIso}`)
+    } else if(type==='URGENTE'){
+      updateProceso(proceso.id,{ prioridad:'CRITICA', ultimaActividad: nowIso,
+        historial: [...(proceso.historial||[]), { fecha: nowIso.slice(0,10), icon:'🔴', texto:'Marcado CRÍTICA por Mascota' }] })
+      setProcesos(getProcesos()); showToast('🔴 Marcado como CRÍTICA')
+    } else if(type==='FOCUS'){
+      setSel(proceso); setTab('procesos'); showToast(`→ ${proceso.id}`)
+    }
+  }
+
+  if(session===undefined){
+    return (
+      <div className="login-loading">
+        <div className="login-loading-logo">SO</div>
+        <div className="mono" style={{fontSize:12,color:'var(--muted)'}}>Verificando sesión…</div>
+      </div>
+    )
+  }
+  if(!session){
+    return <LoginScreen onDemoLogin={handleDemoLogin} onRealConnect={handleRealConnect} loginStatus={loginStatus} composioConfigured={composioConfigured} />
+  }
+
   return (
     <div className="app">
       <Toast msg={toast} onClose={()=>setToast('')} />
@@ -160,7 +280,17 @@ export default function App(){
           </div>
           <button className="theme-toggle" onClick={()=>setTheme(theme==='light'?'dark':'light')} title="Tema">{theme==='light'?'🌙':'☀️'}</button>
           <a href="https://github.com/CamiloGs-univalle/secretaria-operativa-ia/releases" target="_blank" rel="noopener" className="btn" style={{fontSize:12, textDecoration:"none", display:"flex", alignItems:"center", gap:6}} title="App de escritorio">App Escritorio</a>
-          <div className="avatar">CG</div>
+          <div className="user-menu">
+            <button className="avatar" onClick={()=>setMenuOpen(o=>!o)} title={session.email} aria-label="Cuenta" aria-expanded={menuOpen}>{iniciales(session.nombre)}</button>
+            {menuOpen && (
+              <div className="user-menu-pop">
+                <div style={{fontWeight:800,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{session.nombre}</div>
+                <div style={{fontSize:12,color:'var(--muted)',margin:'2px 0 8px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{session.email}</div>
+                <Pill color={session.real?'green':'gray'}>{session.real?'Gmail real conectado':'Modo demostración'}</Pill>
+                <button className="btn sm ghost" style={{width:'100%',marginTop:12,justifyContent:'center'}} onClick={handleLogout}>Cerrar sesión</button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -259,7 +389,7 @@ export default function App(){
                           <td><Pill color={a.clasificacion.tipo==='SOLICITUD'?'blue':a.clasificacion.tipo==='INCIDENCIA'?'red':a.clasificacion.tipo==='URGENTE'?'red':'gray'}>{a.clasificacion.tipo}</Pill><div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{a.relevancia.score}% relev.</div></td>
                           <td style={{fontSize:12}}>{a.turno.accionEsperadaDe==='COORDINADORA'?<b className="turno-tu">TÚ</b>:<span className="turno-externo">Externo</span>}<div style={{fontSize:11,color:'var(--muted)'}}>{a.turno.tipoRespuesta}</div></td>
                           <td><PrioridadDot n={a.prioridad.nivel}/><small style={{marginLeft:6,fontWeight:700}}>{a.prioridad.nivel}</small><div style={{fontSize:11,color:'var(--muted)'}}>{a.prioridad.score}/100</div></td>
-                          <td><div style={{display:'flex',gap:6,flexWrap:'wrap'}} onClick={e=>e.stopPropagation()}><button className="btn sm primary" onClick={()=>abrirResponder(correo)}>Responder IA</button><button className="btn sm" onClick={()=>{ const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){ setSel(p); setTab('procesos')} else showToast('Sin proceso — correo informativo')}}>Ver</button><button className="btn sm ghost" onClick={()=>archivarCorreo(correo.id)}>Archivar</button></div></td>
+                          <td style={{whiteSpace:'nowrap'}}><div style={{display:'flex',gap:6}} onClick={e=>e.stopPropagation()}><button className="btn sm primary" onClick={()=>abrirResponder(correo)}>Responder IA</button><button className="btn sm ghost" onClick={()=>archivarCorreo(correo.id)}>Archivar</button></div></td>
                         </tr>
                       ))}
                     </tbody>
@@ -269,12 +399,24 @@ export default function App(){
               </div>
 
               <div className="card">
-                <div className="card-head"><h3>📊 Indicadores ejecutivos</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Volumen • Productividad • Cumplimiento</span></div>
-                <div className="indicators">
-                  <div><b>Volumen</b><div className="mono">recibidos 47 • procesados {correos.length} • procesos {stats.total} • cerrados {procesos.filter(p=>p.estado==='CERRADO').length}</div><div className="bar" style={{height:4}}><div style={{width:'76%'}}/></div></div>
-                  <div><b>Productividad</b><div className="mono">2.1 días prom • 3.2/día • 8 tareas hechas</div><div className="bar" style={{height:4}}><div style={{width:'68%'}}/></div></div>
-                  <div><b>Cumplimiento</b><div className="mono">72% a tiempo • 28% fuera • retraso 1.4d</div><div className="bar" style={{height:4,background:'#fef2f2'}}><div style={{width:'72%',background:'#059669'}}/></div></div>
-                  <div><b>Incidencias</b><div className="mono">2 activas • 12% tasa • causas: info, reprog</div><div className="bar" style={{height:4}}><div style={{width:'12%',background:'#dc2626'}}/></div></div>
+                <div className="card-head"><h3>📊 Indicadores ejecutivos</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Calculados de tus procesos reales — no ejemplos</span></div>
+                <div className="charts-row">
+                  <div className="chart-box">
+                    <Donut pct={metricas.pctCerrados} color="var(--green)" label="Cerrados" sub={`${metricas.cerrados} de ${metricas.total} procesos`} />
+                  </div>
+                  <div className="chart-box">
+                    <Donut pct={metricas.pctATiempo} color={metricas.pctATiempo>=70?'var(--green)':metricas.pctATiempo>=40?'var(--orange)':'var(--red)'} label="A tiempo" sub={`${metricas.aTiempo} de ${metricas.total} sin retraso`} />
+                  </div>
+                  <div className="chart-box chart-box-wide">
+                    <div style={{fontWeight:700,fontSize:12,marginBottom:10,color:'var(--text2)'}}>Procesos por área</div>
+                    <HBarList data={metricas.areaData} colors={['var(--accent)']} />
+                  </div>
+                </div>
+                <div className="indicators" style={{marginTop:16}}>
+                  <div><b>Volumen</b><div className="mono">correos analizados {correos.length} • procesos {metricas.total} • cerrados {metricas.cerrados}</div></div>
+                  <div><b>Tiempo promedio</b><div className="mono">{metricas.diasProm.toFixed(1)}d transcurridos (prom. de procesos abiertos y cerrados)</div></div>
+                  <div><b>Cumplimiento</b><div className="mono">{metricas.pctATiempo}% a tiempo • {100-metricas.pctATiempo}% con retraso</div></div>
+                  <div><b>Incidencias</b><div className="mono">{metricas.incActivas} activa{metricas.incActivas===1?'':'s'} de {metricas.total} procesos</div></div>
                 </div>
               </div>
             </>
@@ -477,13 +619,20 @@ export default function App(){
                     enviar_respuesta:'✉️ Envió una respuesta',
                     reenvio:'↪️ Preparó un reenvío',
                     reply_ready:'✅ Marcó un proceso listo para responder',
+                    mascota_instruccion:'🐶 Mascota — instrucción',
+                    mascota_completar:'🐶 Posible finalización',
+                    mascota_cerrar:'🐶 Cierre confirmado',
+                    mascota_reenvio_preparado:'🐶 Reenvío preparado',
+                    mascota_reprogramar:'🐶 Reprogramado',
+                    mascota_seguimiento:'🐶 Seguimiento creado',
+                    mascota_urgente:'🐶 Marcado urgente',
                   }
                   if(!log.length) return <div className="empty-state">Aún no hay acciones registradas. Aparecerán aquí en cuanto sincronice Gmail o responda un correo.</div>
                   return log.slice(0,30).map((r,i)=>(
                     <div key={i} style={{display:'flex',gap:12,fontSize:12,border:'1px solid var(--border)',borderRadius:8,padding:12,alignItems:'center',background:'var(--bg2)',flexWrap:'wrap'}}>
                       <span className="mono" style={{color:'var(--muted)',minWidth:140}}>{new Date(r.fecha).toLocaleString()}</span>
                       <span style={{minWidth:110,fontWeight:700}}>{r.usuario}</span>
-                      <span style={{flex:1,minWidth:160}}>{etiqueta[r.accion]||r.accion}{r.to?` — a ${String(r.to).split('<')[0].trim()}`:''}{r.subject?`: "${r.subject.slice(0,60)}"`:''}{r.account?` (${r.account})`:''}{r.id?` — ${r.id}`:''}</span>
+                      <span style={{flex:1,minWidth:160}}>{etiqueta[r.accion]||r.accion}{r.to?` — a ${String(r.to).split('<')[0].trim()}`:''}{r.subject?`: "${r.subject.slice(0,60)}"`:''}{r.account?` (${r.account})`:''}{r.id?` — ${r.id}`:''}{r.proceso?` • ${r.proceso}`:''}{r.destinatario?` → ${r.destinatario}`:''}{r.texto?` “${r.texto.slice(0,40)}”`:''}</span>
                       <Pill color="blue">Registrado</Pill>
                     </div>
                   ))
@@ -494,6 +643,8 @@ export default function App(){
         </main>
 
       </div>
+      {/* Mascota flotante — mano derecha, concisa, no duplica la web */}
+      <Mascota procesos={procesos} analisis={analisis} sel={sel} viewCorreo={viewCorreo} onAction={handleMascotaAction} showToast={showToast} />
       {reply && (
         <div className="reply-overlay" onClick={()=>!sending && setReply(null)}>
           <div className="reply-modal" onClick={e=>e.stopPropagation()}>
