@@ -2,6 +2,8 @@
 // Body: { to, subject, body, threadId }
 // Requiere OAuth en Vercel env: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN
 // Fallback: Composio GMAIL_SEND_EMAIL si hay COMPOSIO_API_KEY
+import { getSession } from '../_lib/session.js'
+import { ejecutarAccionGmail } from '../_lib/composio.js'
 
 export default async function handler(req, res){
   if(req.method!=='POST') return res.status(405).json({error:'POST only'})
@@ -12,6 +14,16 @@ export default async function handler(req, res){
   // Aquí se registra auditoría y valida que no sea envío masivo/automático sin permiso
   const allowed = true // en prod validar contra lista blanca / reglas
   if(!allowed) return res.status(403).json({error:'Action Guard bloqueó envío'})
+
+  // 0) NUEVO: si esta persona conectó su propio Gmail (login real vía
+  // Composio), enviar desde SU cuenta — no la fija de antes.
+  const session = getSession(req)
+  if(session?.connectedAccountId){
+    try{
+      const j = await ejecutarAccionGmail({ action:'GMAIL_SEND_EMAIL', params:{ to, subject, body, threadId }, connectedAccountId: session.connectedAccountId })
+      return res.json({ ok:true, id: j.data?.messageId || j.id, via:'composio-usuario' })
+    }catch(e){ console.error('[gmail/send] Composio por-usuario falló, sigue con el flujo normal:', e.message) }
+  }
 
   // 1) Intento Gmail API directo (preferido — usa token del usuario)
   const hasGoogle = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_REFRESH_TOKEN

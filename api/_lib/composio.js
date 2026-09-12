@@ -1,0 +1,62 @@
+// Helpers para Composio — el mismo servicio que ya usa api/gmail/send.js
+// para el fallback de envío (COMPOSIO_API_KEY ya está configurada).
+//
+// Esto AÑADE la parte que faltaba: dejar que CUALQUIER persona conecte su
+// propia cuenta de Gmail (no solo la cuenta fija de antes), usando el flujo
+// de cuentas conectadas de Composio.
+//
+// Nota importante: la API de Composio evoluciona seguido. Los nombres de
+// acción y campos aquí están basados en su documentación pública más
+// reciente (api/v3.1 para conexiones, api/v2 para ejecutar acciones — igual
+// que ya usa send.js). Si algo aquí falla, el dashboard de Composio
+// (sección "API Playground" de cada acción) muestra el request exacto que
+// funciona para tu cuenta — es la fuente más confiable para ajustar esto.
+const V3 = 'https://backend.composio.dev/api/v3.1'
+const V2 = 'https://backend.composio.dev/api/v2'
+
+function headers(){
+  return { 'x-api-key': process.env.COMPOSIO_API_KEY, 'Content-Type': 'application/json' }
+}
+
+// Crea una sesión de autorización hospedada por Composio para que `userId`
+// (usamos su correo como identificador) conecte su Gmail. Devuelve la URL a
+// la que hay que redirigir al navegador.
+export async function crearEnlaceConexion({ userId, callbackUrl }){
+  const r = await fetch(`${V3}/connected_accounts/link`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({
+      user_id: userId,
+      auth_config_id: process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
+      callback_url: callbackUrl
+    })
+  })
+  const j = await r.json().catch(()=>({}))
+  if(!r.ok) throw new Error('composio_link_failed: ' + JSON.stringify(j))
+  const redirectUrl = j.redirect_url || j.redirectUrl || j.data?.redirect_url
+  if(!redirectUrl) throw new Error('composio_link_no_redirect_url: ' + JSON.stringify(j))
+  return { redirectUrl, connectedAccountId: j.connected_account_id || j.connectedAccountId || j.id || null }
+}
+
+export async function estadoConexion(connectedAccountId){
+  const r = await fetch(`${V3}/connected_accounts/${connectedAccountId}`, { headers: headers() })
+  const j = await r.json().catch(()=>({}))
+  return { ok: r.ok, status: j.status || j.data?.status, raw: j }
+}
+
+// Ejecuta una acción del toolkit gmail para la cuenta conectada de una
+// persona específica (mismo endpoint/estilo que ya usa send.js, solo que
+// ahora aceptando a qué cuenta conectada aplica — antes siempre usaba la
+// cuenta por defecto).
+export async function ejecutarAccionGmail({ action, params, connectedAccountId }){
+  const body = { toolkit: 'gmail', action, params }
+  if(connectedAccountId) body.connectedAccountId = connectedAccountId
+  const r = await fetch(`${V2}/actions/execute`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify(body)
+  })
+  const j = await r.json().catch(()=>({}))
+  if(!r.ok) throw new Error('composio_action_failed: ' + JSON.stringify(j))
+  return j
+}
