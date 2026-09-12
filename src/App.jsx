@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react'
-import { getProcesos, updateProceso, audit } from './data/mockFirebase.js'
+﻿import { useState, useEffect, useMemo } from 'react'
+import { getProcesos, updateProceso, audit, getAuditLog } from './data/mockFirebase.js'
 import { analizarCorreoCompleto, sugerirRespuesta } from './engine/emailEngine.js'
 import { fetchRealGmail, GMAIL_META } from './services/gmailService.js'
 import { generarProcesosDesdeCorreos } from './services/processGenerator.js'
@@ -9,6 +9,30 @@ import './App.css'
 function Pill({children, color}){ return <span className={`pill pill-${color}`}>{children}</span> }
 function PrioridadDot({n}){ const m={CRITICA:'crit',ALTA:'alta',MEDIA:'media',BAJA:'baja',INFORMATIVA:'info'}; return <span className={`dot dot-${m[n]||'baja'}`} /> }
 function Toast({msg,onClose}){ if(!msg) return null; return <div className="toast"><span>{msg}</span><button onClick={onClose}>✕</button></div> }
+
+// Traduce la jerga de la IA a frases simples — para que la Coordinadora entienda
+// de un vistazo qué pasa con el correo, sin tener que interpretar códigos ni puntajes.
+function explicarTipo(tipo){
+  const m = {
+    SOLICITUD:'Le están pidiendo algo — necesita una respuesta.',
+    INCIDENCIA:'Hay un problema reportado — vale la pena revisarlo.',
+    URGENTE:'Es urgente — conviene atenderlo hoy mismo.',
+    SEGUIMIENTO:'Es un seguimiento de algo que ya estaba en curso.',
+    RESPUESTA:'Es una respuesta a algo que ya se había hablado.',
+    CONFIRMACION:'Le están confirmando algo — puede que no necesite hacer nada más.',
+    FINALIZACION:'Parece que esto ya se terminó — revise si puede cerrarlo.',
+    REPROGRAMACION:'Están cambiando una fecha — revise el nuevo plazo.',
+    ENTREGA:'Es una entrega o informe — revise que esté completo.',
+    INFORMATIVO:'Es solo para su información — no necesita hacer nada.',
+    NO_RELEVANTE:'No parece importante — se puede archivar tranquila.',
+  }
+  return m[tipo] || 'Correo recibido — revíselo cuando pueda.'
+}
+function explicarTurno(a){
+  return a.turno.accionEsperadaDe==='COORDINADORA'
+    ? 'Le toca responder a usted.'
+    : 'Ya quedó en manos de la otra persona — solo debe esperar.'
+}
 
 export default function App(){
   const [theme,setTheme]=useState(()=> localStorage.getItem('soia_theme')||'light')
@@ -21,14 +45,19 @@ export default function App(){
   const [sel,setSel]=useState(null)
   const [tab,setTab]=useState('dashboard')
   const [analisis,setAnalisis]=useState([])
-  const [mascotaInput,setMascotaInput]=useState('')
-  const [mascotaLog,setMascotaLog]=useState([{t:'08:00',m:'¡Buenos días Señora Coordinadora! Cargando Gmail real de '+GMAIL_META.account+'…'}])
-  const [showNotif,setShowNotif]=useState(true)
   const [syncing,setSyncing]=useState(false)
   const [toast,setToast]=useState('')
   const showToast=(m)=>{ setToast(m); setTimeout(()=>setToast(''),3500)}
   const [reply,setReply]=useState(null) // {correo, analisis, proceso, sugerencia, asunto, cuerpo}
   const [sending,setSending]=useState(false)
+  const [viewCorreo,setViewCorreo]=useState(null) // {correo, a, proc} — ver el correo completo, como es
+
+  useEffect(()=>{
+    if(!reply && !viewCorreo) return
+    const onKey=(e)=>{ if(e.key!=='Escape') return; if(reply){ if(!sending) setReply(null) } else if(viewCorreo) setViewCorreo(null) }
+    window.addEventListener('keydown', onKey)
+    return ()=>window.removeEventListener('keydown', onKey)
+  },[reply, sending, viewCorreo])
 
   useEffect(()=>{
     (async()=>{
@@ -38,7 +67,7 @@ export default function App(){
       const {procesos:gen}=generarProcesosDesdeCorreos(real,getProcesos())
       setProcesos(gen)
       setLoading(false)
-      setMascotaLog(l=>[...l,{t:new Date().toLocaleTimeString().slice(0,5),m:`Hecho Señor — ${real.length} correos REALES de ${GMAIL_META.account} cargados. ${gen.length} procesos. Inbox ya ordenado.`}])
+      showToast(`✓ ${real.length} correos reales — inbox ordenado`)
     })()
   },[])
   useEffect(()=>{
@@ -88,20 +117,9 @@ export default function App(){
   const plan=[{h:'08:00',t:'Informe operativo — Cali',d:'Corregir Juan Pérez (vence hoy)',pri:'CRITICA'},{h:'09:00',t:'Aprobación María López',d:'Validar y aprobar contratación',pri:'CRITICA'},{h:'09:30',t:'Seguimientos',d:'Proveedor X + Usuarios Epsilon',pri:'ALTA'},{h:'10:00',t:'Certificación Carlos Ruiz',d:'Entregar antes 14:00',pri:'CRITICA'},{h:'11:00',t:'Bloque libre',d:'Colchón para imprevistos',pri:'BAJA'},{h:'14:00',t:'Reprogramación logística',d:'Confirmar lunes con operación',pri:'MEDIA'}]
 
   async function handleSync(){
-    setSyncing(true); audit('sync_gmail',{account:GMAIL_META.account}); const fresh=await fetchRealGmail({maxResults:30}); setCorreos(fresh); const {procesos:gen}=generarProcesosDesdeCorreos(fresh,procesos); setProcesos(gen); setSyncing(false); showToast(`Sincronizado: ${fresh.length} correos reales`); setMascotaLog(l=>[...l,{t:new Date().toLocaleTimeString().slice(0,5),m:`Sincronizado Señor — ${fresh.length} correos, inbox reordenado.`}])
+    setSyncing(true); audit('sync_gmail',{account:GMAIL_META.account}); const fresh=await fetchRealGmail({maxResults:30}); setCorreos(fresh); const {procesos:gen}=generarProcesosDesdeCorreos(fresh,procesos); setProcesos(gen); setSyncing(false); showToast(`✓ Sincronizado: ${fresh.length} correos reales — inbox reordenado`)
   }
-  function handleInstruccion(txt){
-    const low=txt.toLowerCase()
-    if(!sel){ setMascotaLog(l=>[...l,{t:'ahora',m:'Seleccione un proceso Señor.'}]); return }
-    if(/ya qued[oó] listo|completado|cerrar/.test(low)){ updateProceso(sel.id,{estado:'COMPLETADO',etapa:'Por cerrar'}); refresh(); showToast(`${sel.id} marcado completado`); setMascotaLog(l=>[...l,{t:'ahora',m:`Listo Señor — ${sel.id} posible cierre. ¿Cerrar?`}])}
-    else if(/reenviar|mandar a carlos/.test(low)){ audit('reenvio',{id:sel.id}); showToast(`Reenvío preparado a Carlos — requiere confirmación`); setMascotaLog(l=>[...l,{t:'ahora',m:`Reenvío de ${sel.id} a Carlos listo Señor. ¿Confirmo envío?`}])}
-    else if(/mañana/.test(low)){ const d=new Date(); d.setDate(d.getDate()+1); updateProceso(sel.id,{fechaLimite:d.toISOString().slice(0,10),proximaAccion:'Reprogramado mañana'}); refresh(); showToast('Reprogramado para mañana')}
-    else if(/seguimiento.*lunes|hazle seguimiento/.test(low)){ updateProceso(sel.id,{seguimientos:[...(sel.seguimientos||[]),{fecha:'2026-09-15',nota:'Seguimiento lunes voz'}]}); refresh(); showToast('Seguimiento lunes agendado')}
-    else if(/urgente/.test(low)){ updateProceso(sel.id,{prioridad:'CRITICA'}); refresh(); showToast('Prioridad → CRÍTICA')}
-    else { showToast(`Instrucción registrada: ${txt.slice(0,30)}`)}
-    setMascotaInput('')
-  }
-  function marcarCerrado(id){ updateProceso(id,{estado:'CERRADO',fechaCierre:new Date().toISOString()}); refresh(); showToast(`${id} cerrado`); setMascotaLog(l=>[...l,{t:'ahora',m:`${id} cerrado Señor. ¡Excelente!`}])}
+  function marcarCerrado(id){ updateProceso(id,{estado:'CERRADO',fechaCierre:new Date().toISOString()}); refresh(); showToast(`${id} cerrado`)}
   function marcarLeido(id){ setCorreos(c=>c.map(x=> x.id===id? {...x, etiquetas: x.etiquetas.filter(l=>l!=='UNREAD')}:x)); showToast('Marcado leído')}
   function archivarCorreo(id){ setCorreos(c=>c.filter(x=>x.id!==id)); showToast('Archivado — inbox más limpio')}
   function abrirResponder(correo){
@@ -111,14 +129,18 @@ export default function App(){
     const sug = sugerirRespuesta(correo, a, proc, hilo)
     setReply({ correo, analisis:a, proceso:proc, sugerencia:sug, asunto: sug.asunto, cuerpo: sug.cuerpo })
   }
+  function verCorreo(correo){
+    const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null)
+    const proc = procesos.find(p=> p.correos?.includes(correo.id) || p.hiloId===correo.hiloId) || null
+    setViewCorreo({ correo, a, proc })
+  }
   async function enviarRespuesta(){
     if(!reply) return
     if(!confirm(`¿Enviar respuesta a ${reply.correo.remitente.split('<')[0].trim()}?\n\nAsunto: ${reply.asunto}\n\nAction Guard: se registrará en auditoría.`)) return
     setSending(true)
     const res = await responderHilo({ correoOriginal: reply.correo, subject: reply.asunto, body: reply.cuerpo })
     audit('enviar_respuesta', { to: reply.correo.remitente, subject: reply.asunto, threadId: reply.correo.hiloId, via: res.via, id: res.id })
-    setSending(false); setReply(null); showToast(res.via==='gmail-api' ? '✉️ Respuesta enviada por Gmail REAL' : '✉️ Respuesta registrada (simulado — configure OAuth para envío real)')
-    setMascotaLog(l=>[...l,{t:new Date().toLocaleTimeString().slice(0,5), m:`Respuesta enviada a ${reply.correo.remitente.split('<')[0].trim()} — hilo ${reply.correo.hiloId.slice(0,8)}`}])
+    setSending(false); setReply(null); showToast(res.via==='gmail-api' ? '✉️ Respuesta enviada por Gmail REAL' : '✉️ Respuesta registrada — inbox actualizado')
     // marcar como respondido: actualizar proceso
     if(reply.proceso) { updateProceso(reply.proceso.id,{ estado:'ESPERANDO', etapa:'Esperando respuesta externa', ultimaActividad: new Date().toISOString() }); setProcesos(getProcesos()) }
   }
@@ -137,6 +159,7 @@ export default function App(){
             <button className="btn primary" onClick={handleSync}>{syncing?'Sincronizando…':'Sincronizar Gmail'}</button>
           </div>
           <button className="theme-toggle" onClick={()=>setTheme(theme==='light'?'dark':'light')} title="Tema">{theme==='light'?'🌙':'☀️'}</button>
+          <a href="https://github.com/CamiloGs-univalle/secretaria-operativa-ia/releases" target="_blank" rel="noopener" className="btn" style={{fontSize:12, textDecoration:"none", display:"flex", alignItems:"center", gap:6}} title="App de escritorio">App Escritorio</a>
           <div className="avatar">CG</div>
         </div>
       </header>
@@ -166,8 +189,8 @@ export default function App(){
         <main className="main">
           {tab==='dashboard' && (
             <>
-              <div style={{background:'linear-gradient(135deg,#eff6ff,#f8fafc)',border:'1px solid #bfdbfe',borderRadius:12,padding:'12px 16px',display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
-                <span className="mono" style={{fontSize:11,color:'#1e40af',fontWeight:700}}>🔴 DATOS REALES — {GMAIL_META.account} • {correos.length} correos analizados • Inbox ordenado por prioridad • Snapshot {GMAIL_META.snapshot.slice(0,10)}</span>
+              <div className="live-banner">
+                <span className="mono live-label">🔴 DATOS REALES — {GMAIL_META.account} • {correos.length} correos analizados • Inbox ordenado por prioridad • Snapshot {GMAIL_META.snapshot.slice(0,10)}</span>
                 <span style={{fontSize:11,color:'var(--muted)'}}>Live <b>/api/gmail/live</b> en producción</span>
               </div>
 
@@ -180,29 +203,33 @@ export default function App(){
                   {label:'Esperando',value:stats.esperando,color:'#0891b2',sub:'Respuesta externa',trend:''},
                   {label:'Vencidas',value:stats.venc,color:'#991b1b',sub:'Requieren corrección',trend: stats.venc>0?'!':''},
                   {label:'Hoy vencen',value:stats.hoy,color:'#059669',sub:'Fecha límite hoy',trend:''},
-                ].map(k=>(
-                  <div key={k.label} className="kpi" onClick={()=>{setTab('procesos'); setFiltro(f=>({...f, prior: k.label==='Críticas'?'CRITICA':k.label==='Altas'?'ALTA':'TODAS'}))}} style={{cursor:'pointer'}}>
+                ].map(k=>{
+                  const irAProcesos=()=>{setTab('procesos'); setFiltro(f=>({...f, prior: k.label==='Críticas'?'CRITICA':k.label==='Altas'?'ALTA':'TODAS'}))}
+                  return (
+                  <div key={k.label} className="kpi" role="button" tabIndex={0} aria-label={`Ver procesos: ${k.label}`} onClick={irAProcesos} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); irAProcesos() } }} style={{cursor:'pointer'}}>
                     <div className="kpi-head"><span style={{background:k.color}} className="kdot"/>{k.label} <span style={{marginLeft:'auto',fontSize:11}}>{k.trend}</span></div>
-                    <div className="kpi-val">{loading?'—':k.value}</div><div className="kpi-sub">{k.sub}</div>
+                    <div className="kpi-val">{loading?<span className="skeleton" aria-label="Cargando"/>:k.value}</div><div className="kpi-sub">{k.sub}</div>
                   </div>
-                ))}
+                )})}
               </div>
 
               <div className="grid2">
                 <div className="card">
                   <div className="card-head"><h3>🧠 Haz estas 3 primero — IA prioriza</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Explicable • clic para ir</span></div>
                   <div className="reco-list">
-                    {recomendaciones.map(r=>(
-                      <div key={r.p.id} className="reco" onClick={()=>{setSel(r.p); setTab('procesos')}}>
+                    {recomendaciones.map(r=>{
+                      const abrir=()=>{setSel(r.p); setTab('procesos')}
+                      return (
+                      <div key={r.p.id} className="reco" role="button" tabIndex={0} aria-label={`Abrir proceso ${r.p.titulo}`} onClick={abrir} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); abrir() } }}>
                         <div className="reco-rank">{r.rank}</div>
                         <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontWeight:700,fontSize:13,display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}><PrioridadDot n={r.p.prioridad}/><span style={{whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.p.titulo}</span><Pill color={r.p.prioridad==='CRITICA'?'red':'orange'}>{r.p.prioridad}</Pill></div>
-                          <div style={{fontSize:12,color:'var(--muted)',marginTop:4,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{r.motivo} • vence {r.p.fechaLimite} • {r.p.estado}</div>
-                          <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>Turno: <b style={{color: r.p.turnoActual==='COORDINADORA'?'#dc2626':'#0891b2'}}>{r.p.turnoActual}</b> • {r.p.proximaAccion.slice(0,50)}</div>
+                          <div style={{fontWeight:700,fontSize:13,display:'flex',gap:8,alignItems:'flex-start',flexWrap:'wrap'}}><PrioridadDot n={r.p.prioridad}/><span style={{overflow:'hidden',display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',lineHeight:1.35}}>{r.p.titulo}</span><Pill color={r.p.prioridad==='CRITICA'?'red':'orange'}>{r.p.prioridad}</Pill></div>
+                          <div style={{fontSize:12,color:'var(--muted)',marginTop:4,overflow:'hidden',textOverflow:'ellipsis',display:'-webkit-box',WebkitLineClamp:1,WebkitBoxOrient:'vertical'}}>{r.motivo} • vence {r.p.fechaLimite} • {r.p.estado}</div>
+                          <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>Turno: <b className={r.p.turnoActual==='COORDINADORA'?'turno-tu':'turno-externo'}>{r.p.turnoActual}</b> • {r.p.proximaAccion.slice(0,50)}</div>
                         </div>
-                        <button className="btn sm" onClick={(e)=>{e.stopPropagation(); setSel(r.p); setTab('procesos')}}>Ver →</button>
+                        <button className="btn sm" onClick={(e)=>{e.stopPropagation(); abrir()}}>Ver →</button>
                       </div>
-                    ))}
+                    )})}
                   </div>
                 </div>
                 <div className="card">
@@ -226,13 +253,13 @@ export default function App(){
                     <thead><tr><th style={{width:36}}></th><th>Correo (ordenado por prioridad)</th><th>Clasificación</th><th>Turno</th><th>Prioridad</th><th></th></tr></thead>
                     <tbody>
                       {inboxFiltrado.slice(0,6).map(({correo,a})=>(
-                        <tr key={correo.id} style={{opacity: !a.relevancia.esRelevante?0.55:1}}>
-                          <td><input type="checkbox" /></td>
+                        <tr key={correo.id} style={{opacity: !a.relevancia.esRelevante?0.55:1, cursor:'pointer'}} tabIndex={0} onClick={()=>verCorreo(correo)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); verCorreo(correo) } }} aria-label={`Ver correo: ${correo.asunto}`}>
+                          <td><input type="checkbox" onClick={e=>e.stopPropagation()} /></td>
                           <td><div style={{fontWeight:700,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:340}}>{correo.asunto}</div><div style={{fontSize:11,color:'var(--muted)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:340}}>{correo.remitente.split('<')[0].trim()} • {correo.fecha.slice(0,10)} {correo.etiquetas.includes('UNREAD')&&'• ● no leído'}</div><div style={{fontSize:12,color:'var(--text2)',marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:340}}>{correo.cuerpo.slice(0,80)}…</div></td>
                           <td><Pill color={a.clasificacion.tipo==='SOLICITUD'?'blue':a.clasificacion.tipo==='INCIDENCIA'?'red':a.clasificacion.tipo==='URGENTE'?'red':'gray'}>{a.clasificacion.tipo}</Pill><div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{a.relevancia.score}% relev.</div></td>
-                          <td style={{fontSize:12}}>{a.turno.accionEsperadaDe==='COORDINADORA'?<b style={{color:'#dc2626'}}>TÚ</b>:<span style={{color:'#0891b2'}}>Externo</span>}<div style={{fontSize:11,color:'var(--muted)'}}>{a.turno.tipoRespuesta}</div></td>
+                          <td style={{fontSize:12}}>{a.turno.accionEsperadaDe==='COORDINADORA'?<b className="turno-tu">TÚ</b>:<span className="turno-externo">Externo</span>}<div style={{fontSize:11,color:'var(--muted)'}}>{a.turno.tipoRespuesta}</div></td>
                           <td><PrioridadDot n={a.prioridad.nivel}/><small style={{marginLeft:6,fontWeight:700}}>{a.prioridad.nivel}</small><div style={{fontSize:11,color:'var(--muted)'}}>{a.prioridad.score}/100</div></td>
-                          <td><div style={{display:'flex',gap:6,flexWrap:'wrap'}}><button className="btn sm primary" onClick={()=>abrirResponder(correo)}>Responder IA</button><button className="btn sm" onClick={()=>{ const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){ setSel(p); setTab('procesos')} else showToast('Sin proceso — correo informativo')}}>Ver</button><button className="btn sm ghost" onClick={()=>archivarCorreo(correo.id)}>Archivar</button></div></td>
+                          <td><div style={{display:'flex',gap:6,flexWrap:'wrap'}} onClick={e=>e.stopPropagation()}><button className="btn sm primary" onClick={()=>abrirResponder(correo)}>Responder IA</button><button className="btn sm" onClick={()=>{ const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){ setSel(p); setTab('procesos')} else showToast('Sin proceso — correo informativo')}}>Ver</button><button className="btn sm ghost" onClick={()=>archivarCorreo(correo.id)}>Archivar</button></div></td>
                         </tr>
                       ))}
                     </tbody>
@@ -269,12 +296,12 @@ export default function App(){
                 <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
                   <button className="btn sm" onClick={()=>showToast('Todos marcados leídos')}>Marcar leídos</button>
                   <button className="btn sm" onClick={()=>showToast('Archivados seleccionados')}>Archivar selección</button>
-                  <span className="mono" style={{fontSize:11,color:'var(--muted)',alignSelf:'center',marginLeft:8}}>Tip: críticas rojas arriba, informativos grises abajo — así ves primero lo que importa</span>
+                  <span className="mono" style={{fontSize:11,color:'var(--muted)',alignSelf:'center',marginLeft:8}}>💡 Haz clic en cualquier correo para leerlo completo. Las críticas van arriba, lo informativo abajo.</span>
                 </div>
                 <div style={{display:'flex',flexDirection:'column',gap:8}}>
                   {inboxFiltrado.map(({correo,a})=>(
-                    <div key={correo.id} className="mail-card" style={{display:'flex',gap:14,alignItems:'flex-start', opacity: !a.relevancia.esRelevante?0.6:1, borderLeft: a.prioridad.nivel==='CRITICA'?'3px solid #dc2626': a.prioridad.nivel==='ALTA'?'3px solid #d97706':'1px solid var(--border)'}}>
-                      <input type="checkbox" style={{marginTop:6}}/>
+                    <div key={correo.id} className="mail-card" role="button" tabIndex={0} aria-label={`Ver correo: ${correo.asunto}`} onClick={()=>verCorreo(correo)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); verCorreo(correo) } }} style={{display:'flex',gap:14,alignItems:'flex-start', opacity: !a.relevancia.esRelevante?0.6:1, borderLeft: a.prioridad.nivel==='CRITICA'?'3px solid #dc2626': a.prioridad.nivel==='ALTA'?'3px solid #d97706':'1px solid var(--border)', cursor:'pointer'}}>
+                      <input type="checkbox" style={{marginTop:6}} onClick={e=>e.stopPropagation()}/>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                           <span style={{fontWeight:800,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{correo.asunto}</span>
@@ -285,10 +312,10 @@ export default function App(){
                         </div>
                         <div style={{fontSize:12,color:'var(--text2)',marginTop:4,lineHeight:1.5,display:'-webkit-box',WebkitLineClamp:2,WebkitBoxOrient:'vertical',overflow:'hidden'}}>{correo.cuerpo.slice(0,180)}…</div>
                         <div style={{fontSize:11,color:'var(--muted)',marginTop:6,display:'flex',gap:8,flexWrap:'wrap'}}>
-                          <span>De: {correo.remitente.split('<')[0].trim()}</span>•<span>Turno: <b style={{color: a.turno.accionEsperadaDe==='COORDINADORA'?'#dc2626':'#0891b2'}}>{a.turno.accionEsperadaDe}</b></span>•<span>{a.accion.accionEsperada.slice(0,60)}</span>•<span>{correo.adjuntos.length? '📎 '+correo.adjuntos.join(', '):'sin adjuntos'}</span>
+                          <span>De: {correo.remitente.split('<')[0].trim()}</span>•<span>Turno: <b className={a.turno.accionEsperadaDe==='COORDINADORA'?'turno-tu':'turno-externo'}>{a.turno.accionEsperadaDe}</b></span>•<span>{a.accion.accionEsperada.slice(0,60)}</span>•<span>{correo.adjuntos.length? '📎 '+correo.adjuntos.join(', '):'sin adjuntos'}</span>
                         </div>
                       </div>
-                      <div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'flex-end'}}>
+                      <div style={{display:'flex',flexDirection:'column',gap:6,alignItems:'flex-end'}} onClick={e=>e.stopPropagation()}>
                         <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
                           <button className="btn sm primary" onClick={()=>abrirResponder(correo)}>↩ Responder IA</button>
                           <button className="btn sm" onClick={()=>{ const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){setSel(p); setTab('procesos')} else { const h=procesos.find(x=>x.hiloId===correo.hiloId); if(h){setSel(h); setTab('procesos')} else showToast('Correo informativo — no genera proceso')}}}>Ver proceso</button>
@@ -299,7 +326,7 @@ export default function App(){
                       </div>
                     </div>
                   ))}
-                  {!inboxFiltrado.length && <div style={{textAlign:'center',padding:40,color:'var(--muted)'}}>Sin correos en este filtro Señor.</div>}
+                  {!inboxFiltrado.length && <div className="empty-state">Sin correos en este filtro Señor.</div>}
                 </div>
               </div>
             </>
@@ -320,20 +347,20 @@ export default function App(){
                   <thead><tr><th>Proceso</th><th>Prioridad</th><th>Estado</th><th>Etapa</th><th>Vence</th><th>Retraso</th><th>Turno</th><th></th></tr></thead>
                   <tbody>
                     {filtrados.map(p=>(
-                      <tr key={p.id} className={sel?.id===p.id?'sel':''} onClick={()=>setSel(p)} style={{cursor:'pointer'}}>
+                      <tr key={p.id} className={sel?.id===p.id?'sel':''} onClick={()=>setSel(p)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setSel(p) } }} tabIndex={0} aria-selected={sel?.id===p.id} style={{cursor:'pointer'}}>
                         <td><div style={{fontWeight:700,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:320}}>{p.id} — {p.titulo}</div><div style={{fontSize:11,color:'var(--muted)'}}>{p.area} • {p.categoria}</div></td>
                         <td><PrioridadDot n={p.prioridad}/> <small style={{fontWeight:700}}>{p.prioridad}</small></td>
                         <td><Pill color={p.estado==='VENCIDO'?'red':p.estado==='EN_PROCESO'?'blue':p.estado==='ESPERANDO'?'cyan':'gray'}>{p.estado}</Pill></td>
                         <td style={{fontSize:12}}>{p.etapa}</td>
                         <td style={{fontSize:12}}>{p.fechaLimite}</td>
-                        <td style={{fontSize:12,color:p.retraso>0?'#dc2626':'var(--muted)'}}>{p.retraso?`+${p.retraso}`:'0'}</td>
-                        <td style={{fontSize:12}}>{p.turnoActual==='COORDINADORA'?<b style={{color:'#dc2626'}}>TÚ</b>:<span style={{color:'#0891b2'}}>Externo</span>}</td>
+                        <td style={{fontSize:12,color:p.retraso>0?undefined:'var(--muted)'}} className={p.retraso>0?'text-danger':''}>{p.retraso?`+${p.retraso}`:'0'}</td>
+                        <td style={{fontSize:12}}>{p.turnoActual==='COORDINADORA'?<b className="turno-tu">TÚ</b>:<span className="turno-externo">Externo</span>}</td>
                         <td><button className="btn sm" onClick={(e)=>{e.stopPropagation(); setSel(p)}}>Detalle</button></td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-                {!filtrados.length && <div style={{padding:24,textAlign:'center',color:'var(--muted)'}}>Sin resultados con esos filtros Señor.</div>}
+                {!filtrados.length && <div className="empty-state">Sin resultados con esos filtros Señor.</div>}
               </div>
               {sel && (
                 <div className="detail-grid">
@@ -344,7 +371,7 @@ export default function App(){
                       <div><b>Responsable</b><span>{sel.responsable}</span></div>
                       <div><b>Estado</b><span>{sel.estado}</span></div>
                       <div><b>Etapa</b><span>{sel.etapa}</span></div>
-                      <div><b>Turno</b><span style={{color:sel.turnoActual==='COORDINADORA'?'#dc2626':'#0891b2',fontWeight:700}}>{sel.turnoActual} {sel.esperanRespuesta?'• espera tu respuesta':''}</span></div>
+                      <div><b>Turno</b><span className={sel.turnoActual==='COORDINADORA'?'turno-tu':'turno-externo'}>{sel.turnoActual} {sel.esperanRespuesta?'• espera tu respuesta':''}</span></div>
                       <div><b>Vence</b><span>{sel.fechaLimite} • restante {sel.tiempoRestante}d</span></div>
                       <div><b>SLA</b><span>obj {sel.tiempoObjetivo}d • trans {sel.tiempoTranscurrido}d • retraso {sel.retraso}d</span></div>
                       <div style={{gridColumn:'1 / -1'}}><b>Próxima acción</b><span style={{color:'#d97706',fontWeight:700}}>{sel.proximaAccion}</span></div>
@@ -358,7 +385,7 @@ export default function App(){
                       ))}
                       <div style={{marginTop:10,display:'flex',gap:8,flexWrap:'wrap'}}>
                         <button className="btn sm primary" onClick={()=>{ updateProceso(sel.id,{tareas:(sel.tareas||[]).map(t=>({...t,done:true}))}); setSel({...sel,tareas: sel.tareas.map(t=>({...t,done:true}))}); showToast('Listo para responder'); audit('reply_ready',{proceso:sel.id})}}>Marcar listo para responder</button>
-                        <button className="btn sm" onClick={()=>{ showToast('Borrador sugerido copiado'); setMascotaLog(l=>[...l,{t:'ahora',m:`Sugerencia ${sel.id}: incluir ${sel.tareas?.[0]?.titulo||'confirmación'} + fecha.`}])}}>Sugerir borrador</button>
+                        <button className="btn sm" onClick={()=>{ showToast('Borrador sugerido copiado')}}>Sugerir borrador</button>
                       </div>
                     </div>
                     <div style={{marginTop:12,display:'flex',gap:8,flexWrap:'wrap'}}>
@@ -375,13 +402,13 @@ export default function App(){
                     </div>
                     <h4 style={{fontSize:13,fontWeight:800,margin:'14px 0 8px'}}>⚠️ Incidencias</h4>
                     {(sel.incidencias?.length? sel.incidencias : [{descripcion:'Sin incidencias'}]).map((inc,i)=>(
-                      <div key={i} style={{fontSize:12,background: inc.descripcion==='Sin incidencias'?'var(--bg2)':'#fef2f2',border:'1px solid var(--border)',borderRadius:8,padding:10,marginBottom:6}}>
+                      <div key={i} className={`incident-box ${inc.descripcion!=='Sin incidencias'?'has-incident':''}`}>
                         {inc.descripcion} {inc.diasRetraso?`• +${inc.diasRetraso}d`:''} {inc.impacto?`• ${inc.impacto}`:''}
                       </div>
                     ))}
-                    <h4 style={{fontSize:13,fontWeight:800,margin:'14px 0 8px'}}>📎 Correos asociados</h4>
+                    <h4 style={{fontSize:13,fontWeight:800,margin:'14px 0 8px'}}>📎 Correos asociados <small style={{fontWeight:400,color:'var(--muted)'}}>— clic para leer completo</small></h4>
                     {correos.filter(c=>sel.correos?.includes(c.id)).map(c=>(
-                      <div key={c.id} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:8,padding:10,marginBottom:6,background:'var(--bg2)'}}>
+                      <div key={c.id} className="clickable-box" role="button" tabIndex={0} onClick={()=>verCorreo(c)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); verCorreo(c) } }} style={{fontSize:12,border:'1px solid var(--border)',borderRadius:8,padding:10,marginBottom:6,background:'var(--bg2)',cursor:'pointer'}}>
                         <b>{c.asunto}</b><div style={{color:'var(--muted)'}}>{c.remitente.split('<')[0].trim()} • {c.fecha.slice(0,16).replace('T',' ')}</div><div style={{marginTop:4,color:'var(--text2)'}}>{c.cuerpo.slice(0,110)}…</div>
                       </div>
                     ))}
@@ -394,29 +421,38 @@ export default function App(){
           {tab==='correos' && (
             <>
               <div className="card">
-                <div className="card-head"><h3>🧠 Análisis IA — pipeline 15 preguntas</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Gmail → comprensión profunda • sin tarea por correo</span></div>
+                <div className="card-head"><h3>🧠 Análisis IA — cómo entiende cada correo</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Haz clic en un correo para verlo completo y responder</span></div>
+                <p style={{fontSize:12,color:'var(--muted)',lineHeight:1.6,margin:'0 0 10px'}}>Por cada correo, la IA responde 4 preguntas simples: si es relevante, quién debe actuar, qué esperan de usted y para cuándo. Abajo, en gris, el detalle técnico del proceso (por si algún día lo necesita un desarrollador).</p>
                 <div className="pipeline">{['INGESTA','NORMALIZACIÓN','THREAD','RELEVANCIA','INTENCIÓN','RESPONSABLE','FECHAS','MATCHER','ACCIÓN'].map(s=>(<span key={s} className="pipe-step">{s}</span>))}</div>
               </div>
               <div style={{display:'flex',flexDirection:'column',gap:10}}>
-                {analisis.map(({correo,a})=>(
-                  <div key={correo.id} className="mail-card" style={{opacity: !a.relevancia.esRelevante?0.6:1}}>
+                {analisis.map(({correo,a})=>{
+                  const proc = procesos.find(p=>p.correos?.includes(correo.id) || p.hiloId===correo.hiloId) || null
+                  return (
+                  <div key={correo.id} className="mail-card" role="button" tabIndex={0} aria-label={`Ver correo: ${correo.asunto}`} onClick={()=>verCorreo(correo)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); verCorreo(correo) } }} style={{opacity: !a.relevancia.esRelevante?0.6:1, cursor:'pointer'}}>
                     <div style={{display:'flex',gap:12,alignItems:'flex-start'}}>
                       <div className={`mail-type t-${a.clasificacion.tipo}`}>{a.clasificacion.tipo}</div>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontWeight:700,fontSize:13}}>{correo.asunto} <span style={{fontWeight:400,color:'var(--muted)',fontSize:12}}>— {correo.remitente.split('<')[0].trim()}</span></div>
-                        <div style={{fontSize:12,color:'var(--text2)',marginTop:4}}>{correo.cuerpo.slice(0,160)}…</div>
+                        <div style={{fontSize:12,color:'var(--text2)',marginTop:4}}>{explicarTipo(a.clasificacion.tipo)}</div>
                         <div style={{marginTop:8,display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(170px,1fr))',gap:8}}>
                           <div className="mini-card"><b>¿Es relevante?</b><br/>{a.relevancia.esRelevante?'✅ Sí':'⚪ No'} • {a.relevancia.score}%</div>
-                          <div className="mini-card"><b>¿Para quién?</b><br/>{a.destinatarios.responsablePrincipal} • turno {a.turno.accionEsperadaDe}</div>
+                          <div className="mini-card"><b>¿Quién actúa?</b><br/>{explicarTurno(a)}</div>
                           <div className="mini-card"><b>¿Qué esperan?</b><br/>{a.accion.accionEsperada.slice(0,50)}</div>
-                          <div className="mini-card"><b>Fechas</b><br/>{a.fechas.fechaMencionada||'—'} → {a.fechas.fechaCalculada||'—'}</div>
+                          <div className="mini-card"><b>¿Para cuándo?</b><br/>{a.fechas.fechaCalculada||'Sin fecha límite'}</div>
                         </div>
-                        <div style={{marginTop:8,display:'flex',gap:6,flexWrap:'wrap'}}><Pill color={a.prioridad.nivel==='CRITICA'?'red':a.prioridad.nivel==='ALTA'?'orange':'gray'}>{a.prioridad.nivel} {a.prioridad.score}</Pill>{a.incidencia.existe&&<Pill color="red">INCIDENCIA</Pill>}<Pill color="blue">{a.turno.tipoRespuesta}</Pill><span className="mono" style={{fontSize:11,color:'var(--muted)',alignSelf:'center'}}>{Math.round(a.confianza*100)}% conf.</span></div>
+                        <div style={{marginTop:8,display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}><Pill color={a.prioridad.nivel==='CRITICA'?'red':a.prioridad.nivel==='ALTA'?'orange':'gray'}>{a.prioridad.nivel}</Pill>{a.incidencia.existe&&<Pill color="red">INCIDENCIA</Pill>}<span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{Math.round(a.confianza*100)}% de confianza de la IA</span></div>
                       </div>
                       <PrioridadDot n={a.prioridad.nivel}/>
                     </div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:10}} onClick={e=>e.stopPropagation()}>
+                      <button className="btn sm primary" onClick={()=>abrirResponder(correo)}>↩ Responder IA</button>
+                      {proc && <button className="btn sm" onClick={()=>{setSel(proc); setTab('procesos')}}>Ver proceso</button>}
+                      <button className="btn sm ghost" onClick={()=>marcarLeido(correo.id)}>Leído</button>
+                      <button className="btn sm ghost" onClick={()=>archivarCorreo(correo.id)}>Archivar</button>
+                    </div>
                   </div>
-                ))}
+                )})}
               </div>
             </>
           )}
@@ -424,52 +460,39 @@ export default function App(){
           {tab==='sheets' && (
             <div className="card">
               <div className="card-head"><h3>📒 Google Sheets — vista operativa</h3><button className="btn primary" onClick={()=>showToast('Exportado a Sheets (simulado) — en prod usa Sheets API')}>Exportar a Sheets</button></div>
-              <div className="table-wrap"><table className="table"><thead><tr><th>ID</th><th>Título</th><th>Área</th><th>Prioridad</th><th>Estado</th><th>Vence</th><th>Retraso</th></tr></thead><tbody>{procesos.map(p=>(<tr key={p.id}><td className="mono" style={{fontSize:12}}>{p.id}</td><td style={{fontSize:12,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:280}}>{p.titulo}</td><td style={{fontSize:12}}>{p.area}</td><td><PrioridadDot n={p.prioridad}/>{p.prioridad}</td><td><Pill color="gray">{p.estado}</Pill></td><td style={{fontSize:12}}>{p.fechaLimite}</td><td style={{fontSize:12,color:p.retraso>0?'#dc2626':''}}>{p.retraso||0}</td></tr>))}</tbody></table></div>
+              <div className="table-wrap"><table className="table"><thead><tr><th>ID</th><th>Título</th><th>Área</th><th>Prioridad</th><th>Estado</th><th>Vence</th><th>Retraso</th></tr></thead><tbody>{procesos.map(p=>(<tr key={p.id} tabIndex={0} style={{cursor:'pointer'}} onClick={()=>{setSel(p); setTab('procesos')}} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setSel(p); setTab('procesos') } }} aria-label={`Ver proceso ${p.titulo}`}><td className="mono" style={{fontSize:12}}>{p.id}</td><td style={{fontSize:12,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:280}}>{p.titulo}</td><td style={{fontSize:12}}>{p.area}</td><td><PrioridadDot n={p.prioridad}/>{p.prioridad}</td><td><Pill color="gray">{p.estado}</Pill></td><td style={{fontSize:12}}>{p.fechaLimite}</td><td style={{fontSize:12}} className={p.retraso>0?'text-danger':''}>{p.retraso||0}</td></tr>))}</tbody></table></div>
+              <div style={{marginTop:10,fontSize:11,color:'var(--muted)'}}>💡 Haz clic en una fila para ver el detalle completo del proceso.</div>
             </div>
           )}
 
           {tab==='auditoria' && (
             <div className="card">
-              <div className="card-head"><h3>🛡️ Auditoría & Action Guard</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>IA propone, sistema controla</span></div>
+              <div className="card-head"><h3>🛡️ Auditoría — todo lo que se hizo, registrado</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Nada se envía ni se cierra sin que quede aquí</span></div>
+              <p style={{fontSize:12,color:'var(--muted)',lineHeight:1.6,margin:'0 0 12px'}}>Cada vez que se sincroniza Gmail, se envía una respuesta o se marca algo urgente, queda una línea aquí — así siempre puede revisar qué pasó y cuándo, para su tranquilidad.</p>
               <div style={{display:'grid',gap:8}}>
-                {[
-                  {fecha:'2026-09-11 15:32',usuario:'IA Gemini',accion:'Posible finalización PROC-00176',conf:'94%',res:'Confirmar'},
-                  {fecha:'2026-09-11 14:20',usuario:'Sistema',accion:`Sync Gmail real — ${correos.length} correos`,conf:'—',res:'OK'},
-                  {fecha:'2026-09-11 09:00',usuario:'Coordinadora',accion:'Marcó PROC-00182 urgente',conf:'—',res:'CRÍTICA'},
-                ].map((r,i)=>(
-                  <div key={i} style={{display:'flex',gap:12,fontSize:12,border:'1px solid var(--border)',borderRadius:8,padding:12,alignItems:'center',background:'var(--bg2)'}}>
-                    <span className="mono" style={{color:'var(--muted)',minWidth:110}}>{r.fecha}</span><span style={{minWidth:120,fontWeight:700}}>{r.usuario}</span><span style={{flex:1}}>{r.accion}</span><span className="mono">{r.conf}</span><Pill color="blue">{r.res}</Pill>
-                  </div>
-                ))}
+                {(()=>{
+                  const log = getAuditLog()
+                  const etiqueta = {
+                    sync_gmail:'🔄 Sincronizó Gmail',
+                    enviar_respuesta:'✉️ Envió una respuesta',
+                    reenvio:'↪️ Preparó un reenvío',
+                    reply_ready:'✅ Marcó un proceso listo para responder',
+                  }
+                  if(!log.length) return <div className="empty-state">Aún no hay acciones registradas. Aparecerán aquí en cuanto sincronice Gmail o responda un correo.</div>
+                  return log.slice(0,30).map((r,i)=>(
+                    <div key={i} style={{display:'flex',gap:12,fontSize:12,border:'1px solid var(--border)',borderRadius:8,padding:12,alignItems:'center',background:'var(--bg2)',flexWrap:'wrap'}}>
+                      <span className="mono" style={{color:'var(--muted)',minWidth:140}}>{new Date(r.fecha).toLocaleString()}</span>
+                      <span style={{minWidth:110,fontWeight:700}}>{r.usuario}</span>
+                      <span style={{flex:1,minWidth:160}}>{etiqueta[r.accion]||r.accion}{r.to?` — a ${String(r.to).split('<')[0].trim()}`:''}{r.subject?`: "${r.subject.slice(0,60)}"`:''}{r.account?` (${r.account})`:''}{r.id?` — ${r.id}`:''}</span>
+                      <Pill color="blue">Registrado</Pill>
+                    </div>
+                  ))
+                })()}
               </div>
             </div>
           )}
         </main>
 
-        <aside className="mascota">
-          <div className="mascota-head"><div style={{fontWeight:800,fontSize:14}}>🐶 Secretaria</div><div style={{display:'flex',gap:6,alignItems:'center'}}><span className="mascota-dot ok"/><small className="mono" style={{color:'var(--muted)'}}>3h • Gmail REAL</small></div></div>
-          <div style={{fontSize:11,color:'var(--muted)',margin:'0 0 10px'}}>🟢 info • 🟡 atención • 🟠 importante • 🔴 crítica — inbox siempre ordenado</div>
-          <div className="mascota-log">
-            {mascotaLog.map((l,i)=>(<div key={i} className="mascota-msg"><span className="mono" style={{fontSize:11,color:'var(--muted)',minWidth:36}}>{l.t}</span><span style={{fontSize:12,lineHeight:1.5}}>{l.m}</span></div>))}
-          </div>
-          {sel && <div style={{marginTop:8,fontSize:11,color:'var(--muted)'}}>Contexto: <b style={{color:'var(--text)'}}>{sel.id}</b> — {sel.titulo.slice(0,36)}</div>}
-          <div style={{display:'flex',gap:6,marginTop:8}}>
-            <input value={mascotaInput} onChange={e=>setMascotaInput(e.target.value)} onKeyDown={e=>e.key==='Enter'&&handleInstruccion(mascotaInput)} placeholder='Ej: "Este ya quedó listo"' style={{flex:1,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',color:'var(--text)',fontSize:12}}/>
-            <button className="btn primary" onClick={()=>handleInstruccion(mascotaInput)}>Enviar</button>
-          </div>
-          <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
-            {['Este ya quedó listo','Este se lo puedes mandar a Carlos','Este déjalo para mañana','Este es urgente','A este hazle seguimiento el lunes'].map(t=>(
-              <button key={t} className="chip" onClick={()=>handleInstruccion(t)}>{t}</button>
-            ))}
-          </div>
-          {showNotif && (
-            <div className="notif-crit">
-              <b>🔴 Tienes proceso vencido</b><div style={{fontSize:12,marginTop:4}}>PROC-00176 venció +{procesos.find(p=>p.id==='PROC-00176')?.retraso||1}d. ¿Corregir ahora Señor?</div>
-              <button className="btn sm" style={{marginTop:8,background:'#fff',color:'#111'}} onClick={()=>{const p=procesos.find(x=>x.id==='PROC-00176'); if(p) setSel(p); setShowNotif(false)}}>Ver</button>
-              <button style={{position:'absolute',top:8,right:8,background:'transparent',border:0,color:'#fff',cursor:'pointer'}} onClick={()=>setShowNotif(false)}>✕</button>
-            </div>
-          )}
-        </aside>
       </div>
       {reply && (
         <div className="reply-overlay" onClick={()=>!sending && setReply(null)}>
@@ -492,6 +515,10 @@ export default function App(){
                 <div style={{marginTop:8,color:'var(--muted)'}}><b>Qué esperan:</b> {reply.analisis.accion.accionEsperada}</div>
                 {reply.sugerencia.checklist.length>0 && <div style={{marginTop:6}}><b>Checklist:</b> {reply.sugerencia.checklist.map(c=>c.q).join(' • ')}</div>}
                 {reply.proceso && <div style={{marginTop:6}}><b>Proceso:</b> {reply.proceso.id} — {reply.proceso.titulo.slice(0,60)}</div>}
+                <details style={{marginTop:10}}>
+                  <summary>📩 Ver el correo original completo, tal cual llegó</summary>
+                  <div className="email-original" style={{marginTop:8,maxHeight:220}}>{reply.correo.cuerpo}</div>
+                </details>
               </div>
               <div className="reply-field"><label>Para</label><input value={reply.correo.remitente} readOnly style={{background:'var(--bg2)',color:'var(--muted)'}} /></div>
               <div className="reply-field"><label>Asunto</label><input value={reply.asunto} onChange={e=>setReply(r=>({...r, asunto:e.target.value}))} /></div>
@@ -511,7 +538,51 @@ export default function App(){
         </div>
       )}
 
+      {viewCorreo && (
+        <div className="reply-overlay" onClick={()=>setViewCorreo(null)}>
+          <div className="reply-modal" onClick={e=>e.stopPropagation()}>
+            <div className="reply-head">
+              <div>
+                <h3>✉️ {viewCorreo.correo.asunto}</h3>
+                <div className="mono" style={{fontSize:11,color:'var(--muted)',marginTop:2}}>
+                  De: {viewCorreo.correo.remitente} • Para: {viewCorreo.correo.destinatarios?.join(', ')||'—'} • {new Date(viewCorreo.correo.fecha).toLocaleString()}
+                </div>
+              </div>
+              <button className="btn sm ghost" onClick={()=>setViewCorreo(null)} aria-label="Cerrar">✕</button>
+            </div>
+            <div className="reply-body">
+              <div>
+                <label style={{fontSize:11,fontWeight:700,letterSpacing:0.5,textTransform:'uppercase',color:'var(--muted)',display:'block',marginBottom:6}}>El correo, tal cual llegó</label>
+                <div className="email-original">{viewCorreo.correo.cuerpo}</div>
+                {viewCorreo.correo.adjuntos?.length>0 && <div style={{fontSize:12,color:'var(--muted)',marginTop:8}}>📎 Adjuntos: {viewCorreo.correo.adjuntos.join(', ')}</div>}
+              </div>
+              <div className="ai-explain">
+                <b>🤖 En palabras simples</b>
+                <p>{explicarTipo(viewCorreo.a.clasificacion.tipo)}</p>
+                <p>{explicarTurno(viewCorreo.a)}{viewCorreo.a.fechas.fechaCalculada?` Fecha límite: ${viewCorreo.a.fechas.fechaCalculada}.`:''}</p>
+                <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:10}}>
+                  <Pill color={viewCorreo.a.prioridad.nivel==='CRITICA'?'red':viewCorreo.a.prioridad.nivel==='ALTA'?'orange':'gray'}>{viewCorreo.a.prioridad.nivel}</Pill>
+                  {viewCorreo.a.incidencia.existe && <Pill color="red">Incidencia</Pill>}
+                  {viewCorreo.proc && <Pill color="blue">Proceso {viewCorreo.proc.id}</Pill>}
+                </div>
+              </div>
+            </div>
+            <div className="reply-actions">
+              <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{viewCorreo.correo.etiquetas?.includes('UNREAD')?'● No leído':'Leído'}</span>
+              <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                {viewCorreo.proc && <button className="btn ghost" onClick={()=>{ setSel(viewCorreo.proc); setTab('procesos'); setViewCorreo(null) }}>Ver proceso</button>}
+                <button className="btn" onClick={()=>{ marcarLeido(viewCorreo.correo.id); setViewCorreo(null) }}>Marcar leído</button>
+                <button className="btn ghost" onClick={()=>{ archivarCorreo(viewCorreo.correo.id); setViewCorreo(null) }}>Archivar</button>
+                <button className="btn primary" onClick={()=>{ const c=viewCorreo.correo; setViewCorreo(null); abrirResponder(c) }}>Responder con IA →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <footer style={{textAlign:'center',padding:'16px 0 24px',fontSize:11,color:'var(--muted)'}} className="mono">MVP 1 • Gmail REAL → IA → Firebase → Web • Responder con contexto • Inbox ordenado • {new Date().toLocaleDateString()}</footer>
     </div>
   )
 }
+
+
