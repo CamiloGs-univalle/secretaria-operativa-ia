@@ -207,19 +207,9 @@ export default function App(){
     if(!reply) return
     if(!confirm(`¿Enviar respuesta a ${reply.correo.remitente.split('<')[0].trim()}?\n\nAsunto: ${reply.asunto}\n\nAction Guard: se registrará en auditoría.`)) return
     setSending(true)
-    try{
-      const res = await responderHilo({ correoOriginal: reply.correo, subject: reply.asunto, body: reply.cuerpo })
-      audit('enviar_respuesta', { to: reply.correo.remitente, subject: reply.asunto, threadId: reply.correo.hiloId, via: res.via, id: res.id })
-      const esReal = res.via && res.via !== 'simulado'
-      const msg = esReal ? `✉️ Enviado por Gmail REAL (${res.via}) — ID ${String(res.id).slice(0,8)}` : '✉️ Respuesta registrada (modo demo — conecta tu Gmail con Google para envío real)'
-      showToast(msg)
-      if(res.warning) console.warn('[Gmail]', res.warning)
-    }catch(e){
-      audit('enviar_respuesta_error', { error: e.message, to: reply.correo.remitente })
-      showToast(`❌ No se pudo enviar: ${e.message} — verifique que conectó su Gmail con Google`)
-    }finally{
-      setSending(false); setReply(null)
-    }
+    const res = await responderHilo({ correoOriginal: reply.correo, subject: reply.asunto, body: reply.cuerpo })
+    audit('enviar_respuesta', { to: reply.correo.remitente, subject: reply.asunto, threadId: reply.correo.hiloId, via: res.via, id: res.id })
+    setSending(false); setReply(null); showToast(res.via==='gmail-api' ? '✉️ Respuesta enviada por Gmail REAL' : '✉️ Respuesta registrada — inbox actualizado')
     // marcar como respondido: actualizar proceso
     if(reply.proceso) { updateProceso(reply.proceso.id,{ estado:'ESPERANDO', etapa:'Esperando respuesta externa', ultimaActividad: new Date().toISOString() }); setProcesos(getProcesos()) }
   }
@@ -258,8 +248,6 @@ export default function App(){
       updateProceso(proceso.id,{ prioridad:'CRITICA', ultimaActividad: nowIso,
         historial: [...(proceso.historial||[]), { fecha: nowIso.slice(0,10), icon:'🔴', texto:'Marcado CRÍTICA por Mascota' }] })
       setProcesos(getProcesos()); showToast('🔴 Marcado como CRÍTICA')
-    } else if(type==='FOCUS'){
-      setSel(proceso); setTab('procesos'); showToast(`→ ${proceso.id}`)
     }
   }
 
@@ -651,10 +639,9 @@ export default function App(){
             </div>
           )}
         </main>
+        <Mascota procesos={procesos} analisis={analisis} sel={sel} viewCorreo={viewCorreo} onAction={handleMascotaAction} showToast={showToast} />
 
       </div>
-      {/* Mascota flotante — mano derecha, concisa, no duplica la web */}
-      <Mascota procesos={procesos} analisis={analisis} sel={sel} viewCorreo={viewCorreo} onAction={handleMascotaAction} showToast={showToast} />
       {reply && (
         <div className="reply-overlay" onClick={()=>!sending && setReply(null)}>
           <div className="reply-modal" onClick={e=>e.stopPropagation()}>
