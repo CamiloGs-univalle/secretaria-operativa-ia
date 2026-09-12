@@ -17,7 +17,7 @@ function createWindow(){
     alwaysOnTop: true,
     skipTaskbar: false, resizable: true,
     show: false,
-    icon: path.join(__dirname, 'icon.ico'),
+    icon: undefined,
     webPreferences: { 
       nodeIntegration: false, 
       contextIsolation: true, 
