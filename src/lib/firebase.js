@@ -2,22 +2,22 @@ import { initializeApp } from 'firebase/app'
 import { getAuth, GoogleAuthProvider } from 'firebase/auth'
 import { getFirestore } from 'firebase/firestore'
 
-// Config de Firebase — proyecto secretaria-operativa-ia (creado 12/09/2026)
-// Permite que CUALQUIER correo de Google inicie sesión (multi-usuario)
+// Config de Firebase — proyecto GESTOR-12E9A (proporcionado por el Señor Camilo 12/09/2026)
+// Permite que CUALQUIER correo de Google inicie sesión (multi-usuario, Firestore compartido)
 const firebaseConfig = {
-  apiKey: "AIzaSyDofsKVRF_cgCMc2Tq6Mx_4AychdR75VIk",
-  authDomain: "secretaria-operativa-ia.firebaseapp.com",
-  projectId: "secretaria-operativa-ia",
-  storageBucket: "secretaria-operativa-ia.firebasestorage.app",
-  messagingSenderId: "698901683654",
-  appId: "1:698901683654:web:d00d9a6592a6290ab466c7"
+  apiKey: "AIzaSyClMI3Yt3lj5vLb1YmZ0retZ6mdUxc_4j0",
+  authDomain: "gestor-12e9a.firebaseapp.com",
+  projectId: "gestor-12e9a",
+  storageBucket: "gestor-12e9a.firebasestorage.app",
+  messagingSenderId: "852310056108",
+  appId: "1:852310056108:web:fab83978523f2d15a25309",
+  measurementId: "G-FLP1W3Y952"
 }
 
 const app = initializeApp(firebaseConfig)
 export const auth = getAuth(app)
 export const db = getFirestore(app)
 export const googleProvider = new GoogleAuthProvider()
-// Pide acceso a perfil y email — cualquier cuenta Google es bienvenida
 googleProvider.setCustomParameters({ prompt: 'select_account' })
 
 export default app
