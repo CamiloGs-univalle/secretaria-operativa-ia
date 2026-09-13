@@ -8,9 +8,26 @@ const COOKIE_NAME = 'soia_session'
 const STATE_COOKIE = 'soia_composio_state'
 export const COOKIE = { SESSION: COOKIE_NAME, STATE: STATE_COOKIE }
 
+// KDF real (scrypt) en vez de un simple sha256 — deriva la clave de cifrado
+// de la sesión con un costo computacional que dificulta fuerza bruta sobre
+// el secreto. En producción exige SESSION_SECRET explícito: el valor por
+// defecto anterior ('dev-insecure-secret-cambiar-en-produccion') quedaba
+// hardcodeado en el repo, así que cualquiera con el código podía descifrar
+// (y falsificar) cookies de sesión de cualquier despliegue que no hubiera
+// puesto su propio secreto.
+let devSecret = null
+function getSecret(){
+  if(process.env.SESSION_SECRET) return process.env.SESSION_SECRET
+  if(process.env.VERCEL || process.env.NODE_ENV === 'production'){
+    throw new Error('SESSION_SECRET no configurado — requerido en producción (ver COMPOSIO_SETUP.md)')
+  }
+  // Solo en desarrollo local: secreto aleatorio por proceso (no persiste
+  // entre reinicios, así que las sesiones no sobreviven un redeploy local).
+  if(!devSecret) devSecret = crypto.randomBytes(32).toString('hex')
+  return devSecret
+}
 function getKey(){
-  const secret = process.env.SESSION_SECRET || 'dev-insecure-secret-cambiar-en-produccion'
-  return crypto.createHash('sha256').update(secret).digest()
+  return crypto.scryptSync(getSecret(), 'soia-session-kdf-salt-v1', 32)
 }
 
 export function encrypt(obj){

@@ -4,11 +4,27 @@
 import { crearEnlaceConexion } from '../../_lib/composio.js'
 import { setCookie, getAppUrl, COOKIE } from '../../_lib/session.js'
 
+// Rate limit simple en memoria por IP — evita que este endpoint (que llama a
+// la API de Composio) sea usado para golpearla en bucle o para enumerar
+// direcciones de correo.
+const intentos = new Map()
+const RATE_MAX = 10
+const RATE_WINDOW_MS = 10 * 60 * 1000
+function rateLimited(ip){
+  const ahora = Date.now()
+  const lista = (intentos.get(ip) || []).filter(t => ahora - t < RATE_WINDOW_MS)
+  lista.push(ahora)
+  intentos.set(ip, lista)
+  return lista.length > RATE_MAX
+}
+
 export default async function handler(req, res){
   if(!process.env.COMPOSIO_API_KEY || !process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID){
     res.status(500).send('Falta configurar COMPOSIO_API_KEY / COMPOSIO_GMAIL_AUTH_CONFIG_ID. Ver COMPOSIO_SETUP.md')
     return
   }
+  const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'anon'
+  if(rateLimited(ip)){ res.status(429).send('Demasiados intentos — espere unos minutos'); return }
   const email = (req.query?.email || '').trim()
   const name = (req.query?.name || '').trim()
   if(!/^\S+@\S+\.\S+$/.test(email)){ res.status(400).send('Correo inválido'); return }

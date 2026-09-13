@@ -86,16 +86,24 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
     return ()=> clearInterval(id)
   },[freqConf, procesos, estado.id])
 
+  // Registrar el listener UNA sola vez (deps []). Antes dependía de [procesos]
+  // y procesos cambia con frecuencia (cualquier acción sobre un proceso) —
+  // cada cambio volvía a registrar un handler nuevo sin quitar el anterior,
+  // acumulando listeners (y notificaciones duplicadas) durante la sesión.
+  // Usamos un ref para leer los procesos más recientes sin re-suscribirnos.
+  const procesosRef = useRef(procesos)
+  useEffect(()=>{ procesosRef.current = procesos },[procesos])
   useEffect(()=>{
     const handler = (e,data)=>{
       if(data?.hour) {
-        const texto = generarRecordatorio(data.hour, { procesos })
+        const texto = generarRecordatorio(data.hour, { procesos: procesosRef.current })
         setMensajes(m=>[...m, { id: Date.now(), de:'mascota', texto, hora: formatHora(new Date()), tipo:'recordatorio' }])
         setHasNew(true)
       }
     }
     try{ window.mascotaAPI?.onNotif?.(handler) }catch{}
-  },[procesos])
+    return ()=>{ try{ window.mascotaAPI?.offNotif?.(handler) }catch{} }
+  },[])
 
   function pushMensaje(de, texto, extra={}){
     setMensajes(m=>[...m, { id: Date.now()+Math.random(), de, texto, hora: formatHora(new Date()), ...extra }])
@@ -209,7 +217,6 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
         style={{ background: dotColor }}
       >
         <span style={{fontSize:22}}>{estado.emoji}</span>
-        <span style={{fontSize:11,fontWeight:800,color:'#fff',display: abiertaLabel() ? 'inline':'none'}}>{showBadge ? '•' : ''}</span>
         <span className="mascota-fab-label">{abierto ? '—' : resumenCorto}</span>
         {showBadge && <span className="mascota-fab-dot" />}
       </button>
@@ -287,9 +294,4 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
       )}
     </>
   )
-}
-
-function abiertaLabel(){
-// helper para badge — no usado visual
-return true
 }

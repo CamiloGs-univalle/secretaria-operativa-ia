@@ -1,13 +1,15 @@
 ﻿import { useState, useEffect, useMemo } from 'react'
-import { getProcesos, updateProceso, audit, getAuditLog } from './data/mockFirebase.js'
+import { getProcesos, saveProcesos, setModoAlmacenamiento, updateProceso, audit, getAuditLog } from './data/mockFirebase.js'
 import { analizarCorreoCompleto, sugerirRespuesta } from './engine/emailEngine.js'
-import { fetchRealGmail, GMAIL_META } from './services/gmailService.js'
+import { fetchRealGmail } from './services/gmailService.js'
+import { generarCorreosDemo } from './data/demoGmail.js'
 import { generarProcesosDesdeCorreos } from './services/processGenerator.js'
 import { responderHilo } from './services/gmailSendService.js'
 import Mascota from './components/Mascota.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import { Donut, HBarList } from './components/Charts.jsx'
-import { getDemoUser, setDemoUser, clearDemoUser, fetchRealSession, logoutReal, iniciales } from './services/authService.js'
+import { getDemoUser, setDemoUser, clearDemoUser, fetchRealSession, logoutReal, iniciales, signInWithGoogle, logoutFirebase, onFirebaseAuthChange } from './services/authService.js'
+import { fetchProcesosFirestore, subscribeProcesosFirestore } from './data/mockFirebase.js'
 import './App.css'
 
 function Pill({children, color}){ return <span className={`pill pill-${color}`}>{children}</span> }
@@ -31,6 +33,14 @@ function explicarTipo(tipo){
     NO_RELEVANTE:'No parece importante — se puede archivar tranquila.',
   }
   return m[tipo] || 'Correo recibido — revíselo cuando pueda.'
+}
+// Fecha LOCAL en formato YYYY-MM-DD — new Date().toISOString() usa UTC, así
+// que cerca de medianoche en Colombia (UTC-5) marcaba "hoy vencen" con el día
+// equivocado. fechaLimite siempre se guarda como fecha local (YYYY-MM-DD).
+const RE_EMAIL = /^\S+@\S+\.\S+$/
+function fechaLocalISO(d=new Date()){
+  const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0')
+  return `${y}-${m}-${day}`
 }
 function explicarTurno(a){
   return a.turno.accionEsperadaDe==='COORDINADORA'
@@ -56,14 +66,33 @@ export default function App(){
     window.history.replaceState({}, '', url.pathname + (url.search||''))
   },[loginStatus])
 
+  // Firebase primero (cualquier Google) → luego Composio Gmail → luego demo
   useEffect(()=>{
-    (async()=>{
+    const unsub = onFirebaseAuthChange(async (fbUser)=>{
+      if(fbUser){
+        setModoAlmacenamiento(false)
+        setSession(fbUser)
+        // Carga inicial Firestore y suscripción tiempo real (multi-correo compartido)
+        const fbList = await fetchProcesosFirestore()
+        if(fbList) setProcesos(fbList)
+        return
+      }
+      // No Firebase: revisa Composio Gmail o demo
       const real = await fetchRealSession()
-      if(real){ setSession({ nombre: real.name || real.email, email: real.email, real:true }); return }
+      if(real){ setModoAlmacenamiento(false); setSession({ nombre: real.name || real.email, email: real.email, real:true }); return }
       const demo = getDemoUser()
-      setSession(demo ? { ...demo, real:false } : null)
-    })()
+      if(demo){ setModoAlmacenamiento(true); setSession({ ...demo, real:false }); return }
+      setModoAlmacenamiento(true); setSession(null)
+    })
+    return ()=> unsub && unsub()
   },[])
+
+  // Suscripción Firestore en vivo cuando hay sesión Firebase
+  useEffect(()=>{
+    if(!session?.firebase) return
+    const unsub = subscribeProcesosFirestore((list)=> setProcesos(list))
+    return ()=> unsub && unsub()
+  },[session?.firebase])
 
   useEffect(()=>{
     fetch('/api/auth/config').then(r=>r.json()).then(j=>setComposioConfigured(!!j.composioConfigured)).catch(()=>{})
@@ -78,17 +107,25 @@ export default function App(){
 
   function handleDemoLogin({name,email}){
     const u = { nombre:name, email, real:false }
-    setDemoUser(u); setSession(u); showToast(`👋 Bienvenida, ${name.split(' ')[0]} — modo demostración`)
+    setDemoUser(u); setModoAlmacenamiento(true); setSession(u); showToast(`👋 Bienvenida, ${name.split(' ')[0]} — modo demostración`)
+  }
+  async function handleGoogleLogin(){
+    const u = await signInWithGoogle()
+    setModoAlmacenamiento(false)
+    setSession(u)
+    showToast(`👋 Hola ${u.nombre.split(' ')[0]} — Google conectado, Firestore compartido`)
   }
   function handleRealConnect({name,email}){
     window.location.href = `/api/auth/composio/start?email=${encodeURIComponent(email)}&name=${encodeURIComponent(name)}`
   }
   async function handleLogout(){
-    if(session?.real) await logoutReal(); else clearDemoUser()
+    if(session?.firebase) await logoutFirebase()
+    else if(session?.real) await logoutReal()
+    else clearDemoUser()
     setSession(null); setMenuOpen(false); showToast('Sesión cerrada')
   }
 
-  const [procesos,setProcesos]=useState(()=>getProcesos())
+  const [procesos,setProcesos]=useState([])
   const [correos,setCorreos]=useState([])
   const [loading,setLoading]=useState(true)
   const [filtro,setFiltro]=useState({q:'', prior:'TODAS', estado:'TODOS', area:'TODAS'})
@@ -99,9 +136,16 @@ export default function App(){
   const [syncing,setSyncing]=useState(false)
   const [toast,setToast]=useState('')
   const showToast=(m)=>{ setToast(m); setTimeout(()=>setToast(''),3500)}
-  const [reply,setReply]=useState(null) // {correo, analisis, proceso, sugerencia, asunto, cuerpo}
+  const [reply,setReply]=useState(null) // {correo, analisis, proceso, sugerencia, asunto, cuerpo, modo}
   const [sending,setSending]=useState(false)
+  const [confirmSend,setConfirmSend]=useState(false) // 2do paso: evita enviar por un clic accidental
   const [viewCorreo,setViewCorreo]=useState(null) // {correo, a, proc} — ver el correo completo, como es
+  const [seleccionados,setSeleccionados]=useState(()=> new Set()) // ids de correos marcados para acción masiva en Inbox
+  const [gmailError,setGmailError]=useState(null) // mensaje honesto si falló la lectura del Gmail real conectado
+
+  // Al salir del Inbox (o al llegar más correos), limpiar la selección — evita
+  // que un id seleccionado en un filtro quede "fantasma" al cambiar de vista.
+  useEffect(()=>{ setSeleccionados(new Set()) },[tab])
 
   useEffect(()=>{
     if(!reply && !viewCorreo) return
@@ -110,17 +154,55 @@ export default function App(){
     return ()=>window.removeEventListener('keydown', onKey)
   },[reply, sending, viewCorreo])
 
+  // Carga inicial — SOLO cuando ya sabemos si la sesión es demo o real.
+  // Antes esto corría con deps [] (una sola vez, sin esperar la sesión) y
+  // SIEMPRE llamaba a fetchRealGmail — es decir, una persona en modo
+  // demostración terminaba viendo la bandeja REAL de la empresa, justo lo
+  // contrario de lo que promete la pantalla de login. Ahora se ramifica por
+  // session.real y cada modo usa su propio namespace de almacenamiento.
   useEffect(()=>{
-    (async()=>{
+    if(!session) return
+    setModoAlmacenamiento(!session.real)
+    ;(async()=>{
       setLoading(true)
-      const real=await fetchRealGmail({maxResults:30})
-      setCorreos(real)
-      const {procesos:gen}=generarProcesosDesdeCorreos(real,getProcesos())
+      setGmailError(null)
+      let correosIniciales = []
+      let errorReal = null
+      if(session.real){
+        try{
+          correosIniciales = await fetchRealGmail({maxResults:30})
+        }catch(e){
+          // Antes, si esto fallaba, se mostraba en silencio la bandeja de
+          // OTRA cuenta (el snapshot fijo) como si fuera la propia. Ahora se
+          // muestra un aviso honesto y la app queda vacía — nunca datos
+          // ajenos disfrazados de "tu Gmail real".
+          console.error('[App] fetchRealGmail falló:', e.message)
+          errorReal = e.message
+          setGmailError(e.message)
+        }
+      } else {
+        correosIniciales = generarCorreosDemo({name:session.nombre, email:session.email})
+      }
+      setCorreos(correosIniciales)
+      // Nunca partir de getProcesos() en modo demo — ese storage puede tener
+      // procesos de una sesión real anterior en el mismo navegador y también
+      // arrancaría siempre con los 6 procesos semilla ficticios de ejemplo.
+      const base = session.real ? getProcesos() : []
+      const {procesos:gen}=generarProcesosDesdeCorreos(correosIniciales, base, session.real ? 181 : 5000)
+      // Persistir de una vez: si no se guarda aquí, updateProceso() (cerrar,
+      // marcar urgente, checklist, acciones de la Mascota…) no encuentra el
+      // proceso en localStorage y la siguiente lectura vuelve a la lista
+      // semilla — pareciendo que la acción "no funcionó".
+      saveProcesos(gen)
       setProcesos(gen)
       setLoading(false)
-      showToast(`✓ ${real.length} correos reales — inbox ordenado`)
+      if(errorReal){
+        showToast('⚠️ No se pudo leer su Gmail real — vea el aviso arriba')
+      } else {
+        showToast(session.real ? `✓ ${correosIniciales.length} correos reales — inbox ordenado` : `✓ Modo demostración — ${correosIniciales.length} correos de ejemplo`)
+      }
     })()
-  },[])
+  },[session])
   useEffect(()=>{
     if(!correos.length) return
     setAnalisis(correos.map(c=>({correo:c, a:analizarCorreoCompleto(c, procesos.find(p=>p.correos?.includes(c.id))||null)})))
@@ -134,7 +216,7 @@ export default function App(){
     const esperando=procesos.filter(p=>p.estado==='ESPERANDO').length
     const venc=procesos.filter(p=>p.estado==='VENCIDO'||p.retraso>0).length
     const total=procesos.length
-    const hoy=procesos.filter(p=>p.fechaLimite===new Date().toISOString().slice(0,10)).length
+    const hoy=procesos.filter(p=>p.fechaLimite===fechaLocalISO()).length
     return {crit,alta,enProc,esperando,venc,total,hoy}
   },[procesos])
 
@@ -186,17 +268,68 @@ export default function App(){
   const plan=[{h:'08:00',t:'Informe operativo — Cali',d:'Corregir Juan Pérez (vence hoy)',pri:'CRITICA'},{h:'09:00',t:'Aprobación María López',d:'Validar y aprobar contratación',pri:'CRITICA'},{h:'09:30',t:'Seguimientos',d:'Proveedor X + Usuarios Epsilon',pri:'ALTA'},{h:'10:00',t:'Certificación Carlos Ruiz',d:'Entregar antes 14:00',pri:'CRITICA'},{h:'11:00',t:'Bloque libre',d:'Colchón para imprevistos',pri:'BAJA'},{h:'14:00',t:'Reprogramación logística',d:'Confirmar lunes con operación',pri:'MEDIA'}]
 
   async function handleSync(){
-    setSyncing(true); audit('sync_gmail',{account:GMAIL_META.account}); const fresh=await fetchRealGmail({maxResults:30}); setCorreos(fresh); const {procesos:gen}=generarProcesosDesdeCorreos(fresh,procesos); setProcesos(gen); setSyncing(false); showToast(`✓ Sincronizado: ${fresh.length} correos reales — inbox reordenado`)
+    setSyncing(true)
+    setGmailError(null)
+    audit('sync_gmail',{account: session.email || 'demo', firebase: !!session.firebase})
+    let fresh = []
+    // Intenta Gmail real (Composio) si hay sesión de Gmail conectada — funciona para Firebase o Composio
+    const gmailSession = await fetchRealSession()
+    if(gmailSession){
+      try{ fresh = await fetchRealGmail({maxResults:30}) }
+      catch(e){ console.error('[handleSync] fetchRealGmail falló:', e.message); setGmailError(e.message); setSyncing(false); showToast('⚠️ No se pudo sincronizar su Gmail real: '+e.message); return }
+    } else {
+      fresh = generarCorreosDemo({name:session.nombre, email:session.email})
+    }
+    setCorreos(fresh)
+    const {procesos:gen}=generarProcesosDesdeCorreos(fresh,procesos, gmailSession ? 181 : 5000)
+    saveProcesos(gen)
+    setProcesos(gen)
+    setSyncing(false)
+    showToast(gmailSession ? `✓ Sincronizado: ${fresh.length} correos reales (${gmailSession.email})` : `✓ Actualizado: ${fresh.length} correos de ejemplo — Firestore compartido`)
   }
   function marcarCerrado(id){ updateProceso(id,{estado:'CERRADO',fechaCierre:new Date().toISOString()}); refresh(); showToast(`${id} cerrado`)}
   function marcarLeido(id){ setCorreos(c=>c.map(x=> x.id===id? {...x, etiquetas: x.etiquetas.filter(l=>l!=='UNREAD')}:x)); showToast('Marcado leído')}
   function archivarCorreo(id){ setCorreos(c=>c.filter(x=>x.id!==id)); showToast('Archivado — inbox más limpio')}
+  // Selección múltiple del Inbox Ordenado — antes "Marcar leídos"/"Archivar
+  // selección" solo mostraban un toast, sin marcar ni archivar nada de
+  // verdad porque no existía ningún estado de selección real.
+  function toggleSeleccion(id){
+    setSeleccionados(s=>{ const n=new Set(s); n.has(id)? n.delete(id) : n.add(id); return n })
+  }
+  function marcarLeidosSeleccionados(){
+    if(!seleccionados.size) return
+    const ids=[...seleccionados]
+    setCorreos(c=>c.map(x=> ids.includes(x.id)? {...x, etiquetas: x.etiquetas.filter(l=>l!=='UNREAD')}:x))
+    showToast(`✓ ${ids.length} correo(s) marcados leídos`)
+    setSeleccionados(new Set())
+  }
+  function archivarSeleccionados(){
+    if(!seleccionados.size) return
+    const ids=[...seleccionados]
+    setCorreos(c=>c.filter(x=>!ids.includes(x.id)))
+    showToast(`🗄️ ${ids.length} correo(s) archivados`)
+    setSeleccionados(new Set())
+  }
   function abrirResponder(correo){
     const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null)
     const proc = procesos.find(p=> p.correos?.includes(correo.id) || p.hiloId===correo.hiloId) || null
     const hilo = correos.filter(c=> c.hiloId===correo.hiloId).sort((x,y)=> new Date(x.fecha)-new Date(y.fecha))
     const sug = sugerirRespuesta(correo, a, proc, hilo)
-    setReply({ correo, analisis:a, proceso:proc, sugerencia:sug, asunto: sug.asunto, cuerpo: sug.cuerpo })
+    setConfirmSend(false)
+    setReply({ correo, analisis:a, proceso:proc, sugerencia:sug, asunto: sug.asunto, cuerpo: sug.cuerpo, modo:'responder' })
+  }
+  // "Preparar reenvío" — antes solo mostraba un toast y no abría nada de
+  // verdad. Ahora abre el mismo modal de respuesta, en modo reenvío: asunto
+  // con "Fwd:", cuerpo con el mensaje original citado, y el campo "Para"
+  // vacío y editable para que la Coordinadora escriba el destinatario.
+  function prepararReenvio(proceso){
+    const correoBase = correos.find(c=> proceso.correos?.includes(c.id)) || correos.find(c=> c.hiloId===proceso.hiloId)
+    if(!correoBase){ showToast('No hay un correo asociado a este proceso para reenviar Señor'); return }
+    const a = analisis.find(x=> x.correo.id===correoBase.id)?.a || analizarCorreoCompleto(correoBase, proceso)
+    const fwdAsunto = correoBase.asunto.startsWith('Fwd:') ? correoBase.asunto : `Fwd: ${correoBase.asunto}`
+    const fwdCuerpo = `\n\n---------- Mensaje reenviado ----------\nDe: ${correoBase.remitente}\nAsunto: ${correoBase.asunto}\nFecha: ${correoBase.fecha}\n\n${correoBase.cuerpo}`
+    setConfirmSend(false)
+    setReply({ correo: { ...correoBase, remitente:'' }, analisis:a, proceso, sugerencia:{asunto:fwdAsunto, cuerpo:fwdCuerpo, checklist:[], tono:'profesional', confianza:0.9}, asunto:fwdAsunto, cuerpo:fwdCuerpo, modo:'reenviar' })
   }
   function verCorreo(correo){
     const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null)
@@ -205,13 +338,25 @@ export default function App(){
   }
   async function enviarRespuesta(){
     if(!reply) return
-    if(!confirm(`¿Enviar respuesta a ${reply.correo.remitente.split('<')[0].trim()}?\n\nAsunto: ${reply.asunto}\n\nAction Guard: se registrará en auditoría.`)) return
+    // Action Guard de 2 pasos, dentro de la app — antes usaba window.confirm(),
+    // un diálogo nativo del navegador que rompe el estilo, no se puede probar
+    // ni personalizar, y en algunos navegadores bloquea el hilo de eventos.
+    if(!confirmSend){ setConfirmSend(true); return }
     setSending(true)
-    const res = await responderHilo({ correoOriginal: reply.correo, subject: reply.asunto, body: reply.cuerpo })
-    audit('enviar_respuesta', { to: reply.correo.remitente, subject: reply.asunto, threadId: reply.correo.hiloId, via: res.via, id: res.id })
-    setSending(false); setReply(null); showToast(res.via==='gmail-api' ? '✉️ Respuesta enviada por Gmail REAL' : '✉️ Respuesta registrada — inbox actualizado')
-    // marcar como respondido: actualizar proceso
-    if(reply.proceso) { updateProceso(reply.proceso.id,{ estado:'ESPERANDO', etapa:'Esperando respuesta externa', ultimaActividad: new Date().toISOString() }); setProcesos(getProcesos()) }
+    let ok=false
+    try{
+      const res = await responderHilo({ correoOriginal: reply.correo, subject: reply.asunto, body: reply.cuerpo, requiereReal: session.real })
+      audit('enviar_respuesta', { to: reply.correo.remitente, subject: reply.asunto, threadId: reply.correo.hiloId, via: res.via, id: res.id })
+      showToast(res.via==='gmail-api' || res.via?.startsWith('composio') ? '✉️ Respuesta enviada por Gmail REAL' : '✉️ Respuesta registrada — inbox actualizado')
+      // marcar como respondido: actualizar proceso — solo si el envío fue exitoso
+      if(reply.proceso){ updateProceso(reply.proceso.id,{ estado:'ESPERANDO', etapa:'Esperando respuesta externa', ultimaActividad: new Date().toISOString() }); setProcesos(getProcesos()) }
+      ok=true
+    }catch(e){
+      console.error('[enviarRespuesta]', e)
+      showToast('⚠️ No se pudo enviar — inténtelo de nuevo Señor')
+    }finally{
+      setSending(false); setConfirmSend(false); if(ok) setReply(null)
+    }
   }
 
   // Handler central de la Mascota — ejecuta acciones naturales (sec 22) con Action Guard (sec 23)
@@ -229,11 +374,15 @@ export default function App(){
     } else if(type==='REENVIAR'){
       const targetCorreo = correo || (proceso?.correos?.length ? correos.find(c=>c.id===proceso.correos[0]) : null)
       if(!targetCorreo){ showToast('Seleccione un correo para reenviar Señor'); return }
-      // Prepara borrador de reenvío
+      // Prepara borrador de reenvío — el destinatario que entendió la Mascota
+      // es solo un nombre (lenguaje natural), así que el campo "Para" queda
+      // editable para que la Coordinadora confirme la dirección exacta,
+      // igual que en "Preparar reenvío" desde la tabla de Procesos.
       const fwdSubject = targetCorreo.asunto.startsWith('Fwd:') ? targetCorreo.asunto : `Fwd: ${targetCorreo.asunto}`
-      const fwdBody = `Hola ${destinatario},\n\nTe reenvío esta solicitud para tu gestión:\n\n---------- Mensaje original ----------\nDe: ${targetCorreo.remitente}\nAsunto: ${targetCorreo.asunto}\nFecha: ${targetCorreo.fecha}\n\n${targetCorreo.cuerpo}\n\nQuedo atenta a tu confirmación.\n\nCordial saludo,\nCoordinación — Proservis`
-      setReply({ correo: { ...targetCorreo, remitente: `${destinatario} <${destinatario.toLowerCase().replace(/\s+/g,'.')}@proservis.com.co>` }, analisis: analizarCorreoCompleto(targetCorreo, proceso), proceso, sugerencia:{ asunto:fwdSubject, cuerpo:fwdBody, checklist:[], tono:'profesional', confianza:0.92 }, asunto:fwdSubject, cuerpo:fwdBody })
-      showToast(`📨 Borrador de reenvío a ${destinatario} preparado — requiere confirmación`)
+      const fwdBody = `Hola ${destinatario},\n\nTe reenvío esta solicitud para tu gestión:\n\n---------- Mensaje original ----------\nDe: ${targetCorreo.remitente}\nAsunto: ${targetCorreo.asunto}\nFecha: ${targetCorreo.fecha}\n\n${targetCorreo.cuerpo}\n\nQuedo atenta a tu confirmación.\n\nCordial saludo,\nCoordinación`
+      setConfirmSend(false)
+      setReply({ correo: { ...targetCorreo, remitente: '' }, analisis: analizarCorreoCompleto(targetCorreo, proceso), proceso, sugerencia:{ asunto:fwdSubject, cuerpo:fwdBody, checklist:[], tono:'profesional', confianza:0.92 }, asunto:fwdSubject, cuerpo:fwdBody, modo:'reenviar' })
+      showToast(`📨 Borrador de reenvío a ${destinatario} preparado — confirme el correo y el envío`)
     } else if(type==='REPROGRAMAR'){
       const newDate = fecha?.iso || new Date(Date.now()+86400000).toISOString().slice(0,10)
       updateProceso(proceso.id,{ fechaLimite: newDate, proximaAccion:`Reprogramado para ${fecha?.label||newDate}`, estado: proceso.estado==='VENCIDO'?'PENDIENTE':proceso.estado, ultimaActividad: nowIso,
@@ -260,7 +409,7 @@ export default function App(){
     )
   }
   if(!session){
-    return <LoginScreen onDemoLogin={handleDemoLogin} onRealConnect={handleRealConnect} loginStatus={loginStatus} composioConfigured={composioConfigured} />
+    return <LoginScreen onDemoLogin={handleDemoLogin} onGoogleLogin={handleGoogleLogin} onRealConnect={handleRealConnect} loginStatus={loginStatus} composioConfigured={composioConfigured} />
   }
 
   return (
@@ -273,8 +422,8 @@ export default function App(){
         </div>
         <div className="top-actions">
           <div className="sync">
-            <span className="mono" style={{fontSize:11,background:'var(--bg2)',border:'1px solid var(--border)',padding:'5px 10px',borderRadius:999,color:'var(--muted)'}}><span style={{width:7,height:7,background:loading?'#f59e0b':'#059669',borderRadius:'50%',display:'inline-block',marginRight:7}}/>GMAIL REAL • {GMAIL_META.account} • {loading? 'cargando…':`${correos.length} correos`}</span>
-            <button className="btn primary" onClick={handleSync}>{syncing?'Sincronizando…':'Sincronizar Gmail'}</button>
+            <span className="mono" style={{fontSize:11,background:'var(--bg2)',border:'1px solid var(--border)',padding:'5px 10px',borderRadius:999,color:'var(--muted)'}}><span style={{width:7,height:7,background:loading?'#f59e0b':(session.real?'#059669':'#94a3b8'),borderRadius:'50%',display:'inline-block',marginRight:7}}/>{session.real ? `GMAIL REAL • ${session.email}` : '🧪 MODO DEMOSTRACIÓN'} • {loading? 'cargando…':`${correos.length} correos`}</span>
+            <button className="btn primary" onClick={handleSync}>{syncing?'Sincronizando…':(session.real?'Sincronizar Gmail':'Actualizar demo')}</button>
           </div>
           <button className="theme-toggle" onClick={()=>setTheme(theme==='light'?'dark':'light')} title="Tema">{theme==='light'?'🌙':'☀️'}</button>
           <a href="https://github.com/CamiloGs-univalle/secretaria-operativa-ia/releases" target="_blank" rel="noopener" className="btn" style={{fontSize:12, textDecoration:"none", display:"flex", alignItems:"center", gap:6}} title="App de escritorio">App Escritorio</a>
@@ -291,6 +440,14 @@ export default function App(){
           </div>
         </div>
       </header>
+
+      {gmailError && (
+        <div style={{background:'var(--red-bg)',border:'1px solid var(--red)',color:'#991b1b',borderRadius:10,padding:'12px 28px',margin:'0 28px',display:'flex',gap:10,alignItems:'center',flexWrap:'wrap'}}>
+          <span style={{fontWeight:700}}>⚠️ No se pudo leer su Gmail real conectado ({session.email}):</span>
+          <span className="mono" style={{fontSize:12}}>{gmailError}</span>
+          <button className="btn sm" style={{marginLeft:'auto'}} onClick={handleSync}>Reintentar</button>
+        </div>
+      )}
 
       <div className="layout">
         <nav className="sidebar">
@@ -318,8 +475,12 @@ export default function App(){
           {tab==='dashboard' && (
             <>
               <div className="live-banner">
-                <span className="mono live-label">🔴 DATOS REALES — {GMAIL_META.account} • {correos.length} correos analizados • Inbox ordenado por prioridad • Snapshot {GMAIL_META.snapshot.slice(0,10)}</span>
-                <span style={{fontSize:11,color:'var(--muted)'}}>Live <b>/api/gmail/live</b> en producción</span>
+                {session.real ? (
+                  <span className="mono live-label">🔴 DATOS REALES — {session.email} • {correos.length} correos analizados • Inbox ordenado por prioridad</span>
+                ) : (
+                  <span className="mono live-label">🧪 MODO DEMOSTRACIÓN — {correos.length} correos de ejemplo • ningún dato real de Proservis</span>
+                )}
+                <span style={{fontSize:11,color:'var(--muted)'}}>{session.real ? <>Live <b>/api/gmail/live</b> en producción</> : 'Conecte su Gmail real cuando quiera dejar de probar'}</span>
               </div>
 
               <div className="section-label">Resumen ejecutivo</div>
@@ -378,11 +539,10 @@ export default function App(){
                 <div className="card-head"><h3>✉️ Inbox ordenado — vista previa</h3><div style={{display:'flex',gap:8}}><button className="btn sm" onClick={()=>setTab('inbox')}>Abrir inbox completo →</button><button className="btn sm ghost" onClick={handleSync}>Actualizar</button></div></div>
                 <div className="table-wrap">
                   <table className="table">
-                    <thead><tr><th style={{width:36}}></th><th>Correo (ordenado por prioridad)</th><th>Clasificación</th><th>Turno</th><th>Prioridad</th><th></th></tr></thead>
+                    <thead><tr><th>Correo (ordenado por prioridad)</th><th>Clasificación</th><th>Turno</th><th>Prioridad</th><th></th></tr></thead>
                     <tbody>
                       {inboxFiltrado.slice(0,6).map(({correo,a})=>(
                         <tr key={correo.id} style={{opacity: !a.relevancia.esRelevante?0.55:1, cursor:'pointer'}} tabIndex={0} onClick={()=>verCorreo(correo)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); verCorreo(correo) } }} aria-label={`Ver correo: ${correo.asunto}`}>
-                          <td><input type="checkbox" onClick={e=>e.stopPropagation()} /></td>
                           <td><div style={{fontWeight:700,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:340}}>{correo.asunto}</div><div style={{fontSize:11,color:'var(--muted)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:340}}>{correo.remitente.split('<')[0].trim()} • {correo.fecha.slice(0,10)} {correo.etiquetas.includes('UNREAD')&&'• ● no leído'}</div><div style={{fontSize:12,color:'var(--text2)',marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:340}}>{correo.cuerpo.slice(0,80)}…</div></td>
                           <td><Pill color={a.clasificacion.tipo==='SOLICITUD'?'blue':a.clasificacion.tipo==='INCIDENCIA'?'red':a.clasificacion.tipo==='URGENTE'?'red':'gray'}>{a.clasificacion.tipo}</Pill><div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{a.relevancia.score}% relev.</div></td>
                           <td style={{fontSize:12}}>{a.turno.accionEsperadaDe==='COORDINADORA'?<b className="turno-tu">TÚ</b>:<span className="turno-externo">Externo</span>}<div style={{fontSize:11,color:'var(--muted)'}}>{a.turno.tipoRespuesta}</div></td>
@@ -433,15 +593,16 @@ export default function App(){
                   <input placeholder="Buscar asunto, remitente, cuerpo…" value={inboxFiltro.q} onChange={e=>setInboxFiltro(f=>({...f,q:e.target.value}))} style={{flex:1,minWidth:200,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,padding:'8px 12px',fontSize:13}}/>
                   <button className="btn sm ghost" onClick={()=>setInboxFiltro({q:'',tab:'TODOS'})}>Limpiar</button>
                 </div>
-                <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
-                  <button className="btn sm" onClick={()=>showToast('Todos marcados leídos')}>Marcar leídos</button>
-                  <button className="btn sm" onClick={()=>showToast('Archivados seleccionados')}>Archivar selección</button>
-                  <span className="mono" style={{fontSize:11,color:'var(--muted)',alignSelf:'center',marginLeft:8}}>💡 Haz clic en cualquier correo para leerlo completo. Las críticas van arriba, lo informativo abajo.</span>
+                <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap',alignItems:'center'}}>
+                  <button className="btn sm" onClick={marcarLeidosSeleccionados} disabled={!seleccionados.size}>Marcar leídos{seleccionados.size?` (${seleccionados.size})`:''}</button>
+                  <button className="btn sm" onClick={archivarSeleccionados} disabled={!seleccionados.size}>Archivar selección{seleccionados.size?` (${seleccionados.size})`:''}</button>
+                  {seleccionados.size>0 && <button className="btn sm ghost" onClick={()=>setSeleccionados(new Set())}>Deseleccionar</button>}
+                  <span className="mono" style={{fontSize:11,color:'var(--muted)',alignSelf:'center',marginLeft:8}}>💡 Marca la casilla para acciones masivas, o haz clic en el correo para leerlo completo.</span>
                 </div>
                 <div style={{display:'flex',flexDirection:'column',gap:8}}>
                   {inboxFiltrado.map(({correo,a})=>(
                     <div key={correo.id} className="mail-card" role="button" tabIndex={0} aria-label={`Ver correo: ${correo.asunto}`} onClick={()=>verCorreo(correo)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); verCorreo(correo) } }} style={{display:'flex',gap:14,alignItems:'flex-start', opacity: !a.relevancia.esRelevante?0.6:1, borderLeft: a.prioridad.nivel==='CRITICA'?'3px solid #dc2626': a.prioridad.nivel==='ALTA'?'3px solid #d97706':'1px solid var(--border)', cursor:'pointer'}}>
-                      <input type="checkbox" style={{marginTop:6}} onClick={e=>e.stopPropagation()}/>
+                      <input type="checkbox" style={{marginTop:6}} checked={seleccionados.has(correo.id)} onChange={()=>toggleSeleccion(correo.id)} onClick={e=>e.stopPropagation()}/>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
                           <span style={{fontWeight:800,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{correo.asunto}</span>
@@ -525,13 +686,17 @@ export default function App(){
                       ))}
                       <div style={{marginTop:10,display:'flex',gap:8,flexWrap:'wrap'}}>
                         <button className="btn sm primary" onClick={()=>{ updateProceso(sel.id,{tareas:(sel.tareas||[]).map(t=>({...t,done:true}))}); setSel({...sel,tareas: sel.tareas.map(t=>({...t,done:true}))}); showToast('Listo para responder'); audit('reply_ready',{proceso:sel.id})}}>Marcar listo para responder</button>
-                        <button className="btn sm" onClick={()=>{ showToast('Borrador sugerido copiado')}}>Sugerir borrador</button>
+                        <button className="btn sm" onClick={()=>{
+                          const correoVinculado = correos.find(c=> sel.correos?.includes(c.id)) || correos.find(c=> c.hiloId===sel.hiloId)
+                          if(correoVinculado) abrirResponder(correoVinculado)
+                          else showToast('No hay un correo vinculado a este proceso Señor')
+                        }}>Sugerir borrador</button>
                       </div>
                     </div>
                     <div style={{marginTop:12,display:'flex',gap:8,flexWrap:'wrap'}}>
                       <button className="btn primary" onClick={()=>marcarCerrado(sel.id)}>Cerrar proceso</button>
                       <button className="btn" onClick={()=>{updateProceso(sel.id,{prioridad:'CRITICA'}); refresh(); showToast('Urgente → CRÍTICA')}}>Marcar urgente</button>
-                      <button className="btn ghost" onClick={()=>showToast('Borrador preparado — requiere confirmación (Action Guard)')}>Preparar reenvío</button>
+                      <button className="btn ghost" onClick={()=>prepararReenvio(sel)}>Preparar reenvío</button>
                     </div>
                   </div>
                   <div className="card">
@@ -647,8 +812,8 @@ export default function App(){
           <div className="reply-modal" onClick={e=>e.stopPropagation()}>
             <div className="reply-head">
               <div>
-                <h3>↩ Responder — con contexto IA</h3>
-                <div className="mono" style={{fontSize:11,color:'var(--muted)',marginTop:2}}>Hilo {reply.correo.hiloId.slice(0,8)} • {reply.analisis.prioridad.nivel} {reply.analisis.prioridad.score}/100 • conf {Math.round(reply.analisis.confianza*100)}% • {reply.sugerencia.tono}</div>
+                <h3>{reply.modo==='reenviar' ? '↪ Reenviar — requiere confirmación' : '↩ Responder — con contexto IA'}</h3>
+                <div className="mono" style={{fontSize:11,color:'var(--muted)',marginTop:2}}>Hilo {reply.correo.hiloId?.slice(0,8)} • {reply.analisis.prioridad.nivel} {reply.analisis.prioridad.score}/100 • conf {Math.round(reply.analisis.confianza*100)}% • {reply.sugerencia.tono}</div>
               </div>
               <button className="btn sm ghost" onClick={()=>setReply(null)}>✕</button>
             </div>
@@ -668,18 +833,31 @@ export default function App(){
                   <div className="email-original" style={{marginTop:8,maxHeight:220}}>{reply.correo.cuerpo}</div>
                 </details>
               </div>
-              <div className="reply-field"><label>Para</label><input value={reply.correo.remitente} readOnly style={{background:'var(--bg2)',color:'var(--muted)'}} /></div>
-              <div className="reply-field"><label>Asunto</label><input value={reply.asunto} onChange={e=>setReply(r=>({...r, asunto:e.target.value}))} /></div>
-              <div className="reply-field"><label>Mensaje sugerido por IA — editable</label><textarea value={reply.cuerpo} onChange={e=>setReply(r=>({...r, cuerpo:e.target.value}))} rows={12} /></div>
+              <div className="reply-field">
+                <label>Para{reply.modo==='reenviar' && ' — escriba el destinatario'}</label>
+                {reply.modo==='reenviar' ? (
+                  <input value={reply.correo.remitente} onChange={e=>{ const v=e.target.value; setConfirmSend(false); setReply(r=>({...r, correo:{...r.correo, remitente:v}})) }} placeholder="nombre@empresa.com" />
+                ) : (
+                  <input value={reply.correo.remitente} readOnly style={{background:'var(--bg2)',color:'var(--muted)'}} />
+                )}
+              </div>
+              <div className="reply-field"><label>Asunto</label><input value={reply.asunto} onChange={e=>{setConfirmSend(false); setReply(r=>({...r, asunto:e.target.value}))}} /></div>
+              <div className="reply-field"><label>Mensaje sugerido por IA — editable</label><textarea value={reply.cuerpo} onChange={e=>{setConfirmSend(false); setReply(r=>({...r, cuerpo:e.target.value}))}} rows={12} /></div>
               <div style={{fontSize:11,color:'var(--muted)',background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,padding:10}}>
-                💡 <b>Sugerencia IA:</b> El tono es {reply.sugerencia.tono}. La IA ya consideró el hilo completo ({reply.correo.hiloId.slice(0,8)}) y el checklist. Puedes editar antes de enviar. <b>Action Guard:</b> requiere confirmación antes de enviar a externo.
+                💡 <b>Sugerencia IA:</b> El tono es {reply.sugerencia.tono}. La IA ya consideró el hilo completo ({reply.correo.hiloId?.slice(0,8)}) y el checklist. Puedes editar antes de enviar. <b>Action Guard:</b> requiere confirmación antes de enviar a externo.
               </div>
             </div>
             <div className="reply-actions">
-              <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Gmail REAL • {reply.correo.remitente.split('<')[0].trim()} • via {GMAIL_META.account}</span>
+              <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{session.real ? `Gmail REAL • vía ${session.email}` : 'Modo demostración — envío simulado'}{reply.modo==='reenviar' ? ` • reenvío a ${reply.correo.remitente||'—'}` : ` • a ${reply.correo.remitente.split('<')[0].trim()}`}</span>
               <div style={{display:'flex',gap:8}}>
-                <button className="btn ghost" onClick={()=>setReply(null)} disabled={sending}>Cancelar</button>
-                <button className="btn primary" onClick={enviarRespuesta} disabled={sending || !reply.cuerpo.trim()}>{sending?'Enviando…':'Enviar respuesta →'}</button>
+                <button className="btn ghost" onClick={()=>{setReply(null); setConfirmSend(false)}} disabled={sending}>Cancelar</button>
+                <button
+                  className={confirmSend ? 'btn btn-confirm' : 'btn primary'}
+                  onClick={enviarRespuesta}
+                  disabled={sending || !reply.cuerpo.trim() || (reply.modo==='reenviar' && !RE_EMAIL.test(reply.correo.remitente.trim()))}
+                >
+                  {sending?'Enviando…':(confirmSend?'✓ Confirmar y enviar':(reply.modo==='reenviar'?'Reenviar →':'Enviar respuesta →'))}
+                </button>
               </div>
             </div>
           </div>
