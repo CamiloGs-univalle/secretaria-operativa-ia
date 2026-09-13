@@ -31,10 +31,20 @@
 .btn.sm{padding:6px 12px;font-size:12px;border-radius:7px}
 .btn.ghost{background:transparent;box-shadow:none;border-color:transparent;color:var(--muted)}
 .btn.ghost:hover{background:var(--bg2);color:var(--text);border-color:var(--border)}
+.btn:disabled{opacity:.5;cursor:not-allowed;box-shadow:none;transform:none}
+.btn:disabled:hover{transform:none;box-shadow:none}
+/* Confirmación de 2do paso (p.ej. enviar/reenviar correo) — distinta del azul
+   primario para que sea obvio que este clic sí ejecuta la acción de verdad. */
+.btn-confirm{background:linear-gradient(135deg,#d97706,#b45309);border-color:transparent;color:#fff;box-shadow:0 2px 8px rgba(217,119,6,0.25)}
+.btn-confirm:hover{background:linear-gradient(135deg,#b45309,#92400e);box-shadow:0 4px 12px rgba(217,119,6,0.3)}
 .avatar{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#f1f5f9,#e2e8f0);border:1px solid var(--border);display:grid;place-items:center;font-weight:700;font-size:12px;color:var(--text2)}
 [data-theme="dark"] .avatar{background:#1f2937;color:#e5e7eb}
-.layout{display:grid;grid-template-columns:260px minmax(0,1fr) 360px;gap:20px;padding:20px 28px;max-width:1600px;margin:0 auto;align-items:start}
-@media(max-width:1540px){ .layout{grid-template-columns:240px minmax(0,1fr) 340px} }
+/* La Mascota es un widget flotante (position:fixed, ver .mascota-fab/.mascota-flotante
+   más abajo) — no ocupa columna de grid aunque esté en el DOM del .layout. Antes
+   .layout reservaba una 3ra columna de 360px para ella que quedaba siempre vacía,
+   recortando el ancho útil del contenido principal sin motivo. */
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:20px;padding:20px 28px;max-width:1600px;margin:0 auto;align-items:start}
+@media(max-width:1540px){ .layout{grid-template-columns:240px minmax(0,1fr)} }
 .sidebar{display:flex;flex-direction:column;gap:8px;position:sticky;top:68px;align-self:start}
 .nav-item{display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:10px;background:var(--card);border:1px solid var(--border);text-align:left;box-shadow:var(--shadow);transition:.15s}
 .nav-item:hover{border-color:var(--border2);transform:translateY(-1px);box-shadow:var(--shadow-md)}
@@ -142,6 +152,13 @@
 .table tr:last-child td{border-bottom:0}
 .table tr:hover{background:var(--bg2)}
 .table tr.sel{background:var(--accent-light)}
+/* Mantiene visible el botón de acción de la última columna (p.ej. "Detalle")
+   cuando la tabla se desborda horizontalmente en pantallas angostas, en vez
+   de quedar cortado fuera del área visible. */
+.table th:last-child,.table td:last-child{position:sticky;right:0;background:var(--card);z-index:1}
+.table thead th:last-child{background:var(--bg2)}
+.table tr:hover td:last-child{background:var(--bg2)}
+.table tr.sel td:last-child{background:var(--accent-light)}
 .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:12px;box-shadow:var(--shadow)}
 .filters input,.filters select{background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:9px 12px;border-radius:8px;font-size:13px;flex:1;min-width:160px;font-weight:500}
 .filters input::placeholder{color:var(--muted2)}
@@ -172,15 +189,6 @@
 .mini-card{background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;line-height:1.5}
 .mini-card b{font-size:11px;color:var(--text)}
 .code-block{background:#0f172a;border:1px solid #1e293b;border-radius:10px;padding:16px;font-family:'JetBrains Mono',monospace;font-size:11px;color:#93c5fd;overflow:auto;white-space:pre;line-height:1.6}
-.mascota{position:sticky;top:68px;align-self:start;background:var(--card);border:1px solid var(--border);border-radius:12px;padding:18px;display:flex;flex-direction:column;max-height:calc(100vh - 88px);box-shadow:var(--shadow)}
-.mascota-head{display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid var(--border);margin-bottom:12px}
-.mascota-dot{width:10px;height:10px;border-radius:50%}
-.mascota-dot.ok{background:#059669;box-shadow:0 0 0 3px #d1fae5}
-.mascota-dot.info{background:#eab308;box-shadow:0 0 0 3px #fef9c3}
-.mascota-dot.warn{background:#d97706;box-shadow:0 0 0 3px #fef3c7}
-.mascota-dot.crit{background:#dc2626;box-shadow:0 0 0 3px #fecaca}
-.mascota-log{flex:1;overflow:auto;display:flex;flex-direction:column;gap:8px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:12px;min-height:260px;max-height:380px}
-.mascota-msg{display:flex;gap:8px;padding:10px 12px;border-radius:8px;background:var(--card);border:1px solid var(--border);box-shadow:var(--shadow)}
 .chip{font-size:11px;padding:7px 11px;border-radius:999px;background:var(--card);border:1px solid var(--border);color:var(--text2);font-weight:500;box-shadow:var(--shadow);cursor:pointer}
 .chip:hover{background:var(--bg2);border-color:var(--border2);transform:translateY(-1px)}
 .notif-crit{margin-top:14px;background:linear-gradient(135deg,#dc2626,#b91c1c);color:#fff;border-radius:10px;padding:14px;position:relative;box-shadow:0 4px 12px rgba(220,38,38,0.25)}

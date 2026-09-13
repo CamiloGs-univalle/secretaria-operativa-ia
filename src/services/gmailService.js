@@ -1,26 +1,27 @@
-// Gmail Service — conecta con Gmail REAL (auxiliar.ti@proservis.com.co)
-// Estrategia: intenta /api/gmail/live (Vercel Function con Gmail API), fallback a gmailReal.json (snapshot real del 11/09/2026)
-import gmailReal from '../data/gmailReal.json'
-
+// Gmail Service — conecta con Gmail REAL de la persona que inició sesión.
+// Todo el fetch pasa por el backend (/api/gmail/live), que exige sesión
+// autenticada antes de devolver nada. Antes este archivo importaba
+// gmailReal.json directamente aquí en el frontend — eso significaba que el
+// snapshot REAL de correos de la empresa quedaba empaquetado dentro del
+// bundle JS público, descargable por cualquiera que visitara el sitio,
+// sin iniciar sesión siquiera. Se quitó: el snapshot de respaldo ahora
+// vive solo en el servidor (api/gmail/live.js), detrás del gate de sesión.
 const API_BASE = '' // mismo origen — Vercel Functions en /api
 
+// Antes, cualquier error acá (401, 502, red caída) se tragaba en silencio y
+// devolvía [] — la persona veía "0 correos" sin ninguna explicación, o peor,
+// el backend rellenaba con el snapshot de OTRA cuenta y esta función lo
+// devolvía como si nada. Ahora un fallo real se lanza como error explícito
+// (con el mensaje que mandó el servidor) para que la pantalla pueda avisar
+// con honestidad qué pasó, en vez de mostrar una bandeja vacía o ajena sin
+// explicación.
 export async function fetchRealGmail({ maxResults = 30, query = '' } = {}){
-  // 1) Intento live via backend (cuando esté desplegado con OAuth)
-  try{
-    const r = await fetch(`${API_BASE}/api/gmail/live?max=${maxResults}&q=${encodeURIComponent(query)}`, { cache:'no-store' })
-    if(r.ok){
-      const j = await r.json()
-      if(j.messages && j.messages.length) return normalizeGmailMessages(j.messages)
-    }
-  }catch(e){ /* fallback */ }
-  // 2) Fallback snapshot real (no quemado, es dump directo de Gmail API del 11/09/2026 21:35 UTC)
-  // Filtrado por query si se pide
-  let msgs = gmailReal
-  if(query){
-    const q = query.toLowerCase()
-    msgs = msgs.filter(m => (m.asunto+m.cuerpo+m.remitente).toLowerCase().includes(q))
+  const r = await fetch(`${API_BASE}/api/gmail/live?max=${maxResults}&q=${encodeURIComponent(query)}`, { cache:'no-store', credentials:'same-origin' })
+  const j = await r.json().catch(()=>({}))
+  if(!r.ok){
+    throw new Error(j.note || j.error || `No se pudo leer Gmail real (HTTP ${r.status})`)
   }
-  return msgs.slice(0, maxResults)
+  return normalizeGmailMessages(j.messages || [])
 }
 
 export function normalizeGmailMessages(messages){
@@ -47,8 +48,5 @@ export async function syncGmail(){
 }
 
 export const GMAIL_META = {
-  account: 'auxiliar.ti@proservis.com.co',
-  snapshot: '2026-09-11T21:35:57Z',
-  totalInSnapshot: gmailReal.length,
-  note: 'Snapshot real de Gmail API (no mock). Live via /api/gmail/live cuando hay OAuth.'
+  note: 'Gmail real vía /api/gmail/live — requiere sesión conectada. Cada persona ve su propia cuenta.'
 }

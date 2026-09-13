@@ -2,7 +2,14 @@
 // Cada correo se analiza con las 15 preguntas, se agrupa por hilo y se crea/actualiza proceso
 import { analizarCorreoCompleto } from '../engine/emailEngine.js'
 
-export function generarProcesosDesdeCorreos(correos, procesosExistentes=[]){
+// folioBase: piso desde el que se numeran los folios nuevos (PROC-XXXXX).
+// Antes siempre partía de 181, así que el modo demostración (que arranca con
+// procesosExistentes=[]) generaba folios PROC-00182, PROC-00183... — los
+// mismos números que usan los 6 procesos semilla reales de mockFirebase.js.
+// No es una fuga de datos (el contenido es 100% demo), pero un ID
+// coincidente confunde. Con folioBase distinto, demo y real nunca comparten
+// un mismo folio en el mismo navegador.
+export function generarProcesosDesdeCorreos(correos, procesosExistentes=[], folioBase=181){
   const porHilo = {}
   correos.forEach(c=>{
     if(!porHilo[c.hiloId]) porHilo[c.hiloId]=[]
@@ -16,7 +23,7 @@ export function generarProcesosDesdeCorreos(correos, procesosExistentes=[]){
   let siguienteFolio = 1 + procesos.reduce((max,p)=>{
     const n = parseInt(String(p.id).replace(/\D/g,''),10)
     return Number.isFinite(n) && n>max ? n : max
-  }, 181)
+  }, folioBase)
 
   Object.entries(porHilo).forEach(([hiloId, msgs])=>{
     // ordenar por fecha

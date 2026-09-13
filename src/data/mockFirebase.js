@@ -1,5 +1,14 @@
-// Firebase mock — fuente de verdad local + persistencia localStorage
-const KEY='soia_procesos_v1'
+// Firebase mock + Firestore real — fuente de verdad híbrida
+// - Si hay usuario Firebase autenticado (cualquier Google) → Firestore es la verdad, compartida entre todos los correos.
+// - Si no hay sesión Firebase (demo/offline) → localStorage como antes.
+// - Namespace demo/real separado para que demo no mezcle con real en mismo navegador.
+import { db, auth } from '../lib/firebase.js'
+import { collection, doc, setDoc, getDocs, onSnapshot, query, orderBy } from 'firebase/firestore'
+
+let NS = ''
+export function setModoAlmacenamiento(esDemo){ NS = esDemo ? '_demo' : '' }
+function keyProcesos(){ return `soia_procesos_v1${NS}` }
+function keyAudit(){ return `soia_audit${NS}` }
 export const ESTADOS = { NUEVO:'NUEVO', CLASIFICADO:'CLASIFICADO', PENDIENTE:'PENDIENTE', EN_PROCESO:'EN_PROCESO', ESPERANDO:'ESPERANDO', SEGUIMIENTO:'SEGUIMIENTO', COMPLETADO:'COMPLETADO', CERRADO:'CERRADO', BLOQUEADO:'BLOQUEADO', VENCIDO:'VENCIDO', REPROGRAMADO:'REPROGRAMADO', CANCELADO:'CANCELADO', CON_INCIDENCIA:'CON_INCIDENCIA' }
 
 let _procesos = [
@@ -50,29 +59,88 @@ export const correosMock=[
   {id:'m16', hiloId:'th-182', remitente:'sistema@proservis.com.co', destinatarios:['coordinadora@proservis.com.co'], cc:[], asunto:'[Automático] Seguimiento proceso 182', fecha:'2026-09-10T18:00:00', cuerpo:'Hola, ¿cómo vamos con el proceso de María López? Seguimos pendientes de la aprobación.', etiquetas:['INBOX'], adjuntos:[]},
 ]
 
+function isFirebaseMode(){ return !!auth.currentUser && !NS } // demo nunca va a Firestore
+
 export function loadProcesos(){
-  try{ const v=localStorage.getItem(KEY); if(v) return JSON.parse(v)}catch{}
-  return _procesos
+  try{ const v=localStorage.getItem(keyProcesos()); if(v) return JSON.parse(v)}catch{}
+  return NS ? [] : _procesos
 }
-export function saveProcesos(list){ try{ localStorage.setItem(KEY, JSON.stringify(list))}catch{} }
+export function saveProcesos(list){ try{ localStorage.setItem(keyProcesos(), JSON.stringify(list))}catch{} }
 export function getProcesos(){ return loadProcesos() }
 export function getProceso(id){ return loadProcesos().find(p=>p.id===id) }
+
+// Firestore helpers — compartido entre todos los correos logueados con Google
+export async function fetchProcesosFirestore(){
+  if(!isFirebaseMode()) return null
+  try{
+    const snap = await getDocs(collection(db, 'procesos'))
+    if(snap.empty) {
+      // Seed inicial: sube _procesos si está vacío (solo primera vez)
+      for(const p of _procesos){
+        await setDoc(doc(db, 'procesos', p.id), { ...p, createdAt: new Date().toISOString() })
+      }
+      return _procesos
+    }
+    const list = snap.docs.map(d=> d.data())
+    // Cache local para offline
+    saveProcesos(list)
+    return list
+  }catch(e){ console.warn('[Firestore] fetchProcesos', e.message); return null }
+}
+
+export function subscribeProcesosFirestore(cb){
+  if(!isFirebaseMode()) return ()=>{}
+  try{
+    const q = query(collection(db, 'procesos'), orderBy('ultimaActividad','desc'))
+    return onSnapshot(q, (snap)=>{
+      const list = snap.docs.map(d=> d.data())
+      if(list.length) { saveProcesos(list); cb(list) }
+    }, (err)=> console.warn('[Firestore] subscribe', err.message))
+  }catch(e){ console.warn(e); return ()=>{} }
+}
+
+export async function saveProcesoFirestore(proceso){
+  if(!isFirebaseMode()) return
+  try{ await setDoc(doc(db, 'procesos', proceso.id), proceso, { merge:true }) }catch(e){ console.warn(e.message) }
+}
+
 export function updateProceso(id, patch){
   const list=loadProcesos()
   const i=list.findIndex(p=>p.id===id)
-  if(i>=0){ list[i]={...list[i], ...patch, ultimaActividad:new Date().toISOString()}; saveProcesos(list); return list[i]}
+  if(i>=0){
+    list[i]={...list[i], ...patch, ultimaActividad:new Date().toISOString()}
+    saveProcesos(list)
+    // Firestore async (no bloquea UI) — cualquier correo lo ve
+    if(isFirebaseMode()) saveProcesoFirestore(list[i])
+    return list[i]
+  }
   return null
 }
-export function addProceso(p){ const list=loadProcesos(); list.unshift(p); saveProcesos(list); return p }
-export function resetMock(){ localStorage.removeItem(KEY); return _procesos }
-
-// auditoria
-export function audit(action, extra={}){
-  const logs=JSON.parse(localStorage.getItem('soia_audit')||'[]')
-  logs.unshift({fecha:new Date().toISOString(), usuario:'Coordinadora', accion:action, ...extra})
-  localStorage.setItem('soia_audit', JSON.stringify(logs.slice(0,200)))
+export function addProceso(p){
+  const list=loadProcesos(); list.unshift(p); saveProcesos(list)
+  if(isFirebaseMode()) saveProcesoFirestore(p)
+  return p
 }
-// Devuelve el historial REAL de acciones (lo que de verdad se hizo), no un ejemplo fijo.
+export function resetMock(){ localStorage.removeItem(keyProcesos()); return NS ? [] : _procesos }
+
+// auditoria — dual: local + Firestore
+export function audit(action, extra={}){
+  const entry = { fecha:new Date().toISOString(), usuario: auth.currentUser?.email || 'Coordinadora', accion:action, ...extra }
+  try{
+    const logs=JSON.parse(localStorage.getItem(keyAudit())||'[]')
+    logs.unshift(entry)
+    localStorage.setItem(keyAudit(), JSON.stringify(logs.slice(0,200)))
+  }catch(e){ console.error('[audit] local', e.message) }
+  if(isFirebaseMode()){
+    import('firebase/firestore').then(({ collection, addDoc })=>{
+      addDoc(collection(db, 'auditoria'), entry).catch(()=>{})
+    })
+  }
+}
 export function getAuditLog(){
-  try{ return JSON.parse(localStorage.getItem('soia_audit')||'[]') }catch{ return [] }
+  try{ return JSON.parse(localStorage.getItem(keyAudit())||'[]') }catch{ return [] }
+}
+export async function fetchAuditFirestore(){
+  if(!isFirebaseMode()) return []
+  try{ const snap=await getDocs(collection(db,'auditoria')); return snap.docs.map(d=>d.data()).sort((a,b)=> new Date(b.fecha)-new Date(a.fecha)).slice(0,100) }catch{ return [] }
 }

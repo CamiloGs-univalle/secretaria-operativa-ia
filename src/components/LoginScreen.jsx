@@ -18,15 +18,15 @@ function GoogleIcon(){
   )
 }
 
-// Login pensado para CUALQUIER persona, no una cuenta fija: escribe su
-// nombre y su correo una vez, y desde ahí puede (a) conectar su Gmail de
-// verdad (vía Composio — nosotros nunca vemos su contraseña) o (b) entrar
-// en modo demostración sin conectar nada, para probar la app primero.
-export default function LoginScreen({ onDemoLogin, onRealConnect, loginStatus, composioConfigured }){
+// Login multi-correo: cualquier persona con Google entra (Firebase Auth).
+// Luego, opcionalmente, conecta su Gmail real vía Composio para traer correos.
+// Demo sigue disponible sin Google.
+export default function LoginScreen({ onDemoLogin, onRealConnect, onGoogleLogin, loginStatus, composioConfigured }){
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [error, setError] = useState('')
   const [connecting, setConnecting] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   function validar(){
     if(!name.trim()){ setError('Escribe tu nombre para continuar.'); return null }
@@ -42,6 +42,11 @@ export default function LoginScreen({ onDemoLogin, onRealConnect, loginStatus, c
     onDemoLogin(datos)
   }
 
+  async function handleGoogle(){
+    setError(''); setGoogleLoading(true)
+    try{ await onGoogleLogin() }catch(e){ setError(e.message || 'No se pudo iniciar con Google. Verifica que el proveedor Google esté habilitado en Firebase Console → Authentication → Providers.') }
+    setGoogleLoading(false)
+  }
   function conectarReal(){
     const datos = validar()
     if(!datos) return
@@ -73,24 +78,31 @@ export default function LoginScreen({ onDemoLogin, onRealConnect, loginStatus, c
       <div className="login-panel">
         <div className="login-card">
           <h2>Iniciar sesión</h2>
-          <p className="login-sub">Escribe tu nombre y tu correo — luego decides si conectas tu Gmail real o pruebas primero en modo demostración.</p>
+          <p className="login-sub"><b>Cualquier correo</b> — entra con tu Google y todos verán los mismos procesos en Firestore (compartido). Luego, si quieres, conecta tu Gmail para traer correos reales.</p>
 
           {loginStatus === 'error' && <div className="login-alert error">No se pudo completar la conexión con tu Gmail. Intenta de nuevo o usa el modo demostración.</div>}
           {loginStatus === 'cancelado' && <div className="login-alert">Cancelaste la conexión de tu Gmail.</div>}
+
+          <button type="button" className="login-google-btn" onClick={handleGoogle} disabled={googleLoading} style={{width:'100%',justifyContent:'center'}}>
+            <GoogleIcon /> {googleLoading ? 'Abriendo Google…' : 'Continuar con Google — cualquier correo'}
+          </button>
+          <div className="login-note" style={{marginTop:8}}>✅ Firebase: <b>cualquier cuenta Google</b> entra. Los procesos se guardan compartidos en Firestore.</div>
+
+          <div className="login-divider"><span>y</span></div>
 
           <form onSubmit={submitDemo} className="login-form">
             <label>Tu nombre<input value={name} onChange={e=>setName(e.target.value)} placeholder="Ej: Ana Gómez" autoComplete="name" /></label>
             <label>Tu correo<input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Ej: ana@empresa.com" type="email" autoComplete="email" /></label>
             {error && <div className="login-alert error">{error}</div>}
 
-            <button type="button" className="login-google-btn" onClick={conectarReal} disabled={connecting}>
-              <GoogleIcon /> {connecting ? 'Conectando con Google…' : 'Continuar con Google — Conectar mi Gmail'}
+            <button type="button" className="login-google-btn" onClick={conectarReal} disabled={connecting} style={{opacity:0.9}}>
+              <GoogleIcon /> {connecting ? 'Conectando Gmail…' : 'Conectar mi Gmail real (Composio)'}
             </button>
             {!composioConfigured && (
-              <div className="login-note">ℹ️ Configurando Google... Si ves esto, recarga en 1 min o usa modo demostración. <span className="mono">COMPOSIO_GMAIL_AUTH_CONFIG_ID</span></div>
+              <div className="login-note">ℹ️ Gmail: requiere COMPOSIO_GMAIL_AUTH_CONFIG_ID. Ya configurado.</div>
             )}
             {composioConfigured && (
-              <div className="login-note" style={{color:'#059669',borderColor:'#a7f3d0',background:'#ecfdf5'}}>✅ Google configurado — al hacer clic irás a la pantalla de permisos de Google (elige tu cuenta y autoriza Gmail).</div>
+              <div className="login-note" style={{color:'#059669',borderColor:'#a7f3d0',background:'#ecfdf5'}}>✅ Gmail listo — autoriza Gmail para traer tu bandeja real (opcional).</div>
             )}
 
             <div className="login-divider"><span>o</span></div>
