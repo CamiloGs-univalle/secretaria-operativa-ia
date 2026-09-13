@@ -1,5 +1,6 @@
 ﻿import { useState, useEffect, useMemo } from 'react'
 import { getProcesos, saveProcesos, setModoAlmacenamiento, updateProceso, audit, getAuditLog } from './data/mockFirebase.js'
+import { fetchProcesosFirestore, subscribeProcesosFirestore, saveProcesoFirestore, limpiarDatosDeEjemploFirestore } from './data/mockFirebase.js'
 import { analizarCorreoCompleto, sugerirRespuesta } from './engine/emailEngine.js'
 import { fetchRealGmail } from './services/gmailService.js'
 import { generarCorreosDemo } from './data/demoGmail.js'
@@ -9,7 +10,6 @@ import Mascota from './components/Mascota.jsx'
 import LoginScreen from './components/LoginScreen.jsx'
 import { Donut, HBarList } from './components/Charts.jsx'
 import { getDemoUser, setDemoUser, clearDemoUser, fetchRealSession, logoutReal, iniciales, signInWithGoogle, logoutFirebase, onFirebaseAuthChange } from './services/authService.js'
-import { fetchProcesosFirestore, subscribeProcesosFirestore } from './data/mockFirebase.js'
 import './App.css'
 
 function Pill({children, color}){ return <span className={`pill pill-${color}`}>{children}</span> }
@@ -58,6 +58,12 @@ export default function App(){
   const [loginStatus,setLoginStatus]=useState(()=> new URLSearchParams(window.location.search).get('login'))
   const [composioConfigured,setComposioConfigured]=useState(false)
   const [menuOpen,setMenuOpen]=useState(false)
+  // Antes se asumía que session.real === "tiene Gmail conectado". Desde que
+  // Firebase permite iniciar sesión con cualquier Google SIN conectar Gmail
+  // todavía, eso ya no es cierto: session.real (o session.firebase) solo
+  // dice "no es demo". gmailConectado dice si de verdad hay una cuenta Gmail
+  // (Composio) conectada — es lo único que autoriza leer/enviar correo real.
+  const [gmailConectado,setGmailConectado]=useState(false)
 
   useEffect(()=>{
     if(!loginStatus) return
@@ -168,7 +174,18 @@ export default function App(){
       setGmailError(null)
       let correosIniciales = []
       let errorReal = null
-      if(session.real){
+      // "session.real" ya no significa "tiene Gmail conectado" — desde que
+      // se agregó el login con Firebase, alguien puede tener session.real
+      // (o session.firebase) en true por haber entrado con su Google, SIN
+      // haber conectado su Gmail (Composio) todavía. Antes esto se
+      // confundía: cualquier login real intentaba leer Gmail de inmediato,
+      // fallaba para quien solo había hecho login con Google, y mostraba un
+      // aviso de error que en realidad no era un error — solo faltaba
+      // conectar Gmail. Ahora se pregunta explícitamente si hay Gmail
+      // conectado (igual que ya hacía handleSync) antes de intentar leerlo.
+      const gmailSession = session.real ? await fetchRealSession() : null
+      setGmailConectado(!!gmailSession)
+      if(gmailSession){
         try{
           correosIniciales = await fetchRealGmail({maxResults:30})
         }catch(e){
@@ -180,33 +197,46 @@ export default function App(){
           errorReal = e.message
           setGmailError(e.message)
         }
-      } else {
+      } else if(!session.real){
         correosIniciales = generarCorreosDemo({name:session.nombre, email:session.email})
+      }
+      // Firebase con sesión Google pero SIN Gmail conectado: no hay bandeja
+      // que leer todavía. Los procesos de este caso vienen de Firestore (ver
+      // el efecto de suscripción arriba) — no se tocan aquí para no pisarlos
+      // con una regeneración vacía.
+      if(session.firebase && !gmailSession){
+        setLoading(false)
+        showToast(`👋 Sesión con Google lista, ${(session.nombre||'').split(' ')[0]} — conecta tu Gmail cuando quieras traer tu bandeja real`)
+        return
       }
       setCorreos(correosIniciales)
       // Nunca partir de getProcesos() en modo demo — ese storage puede tener
-      // procesos de una sesión real anterior en el mismo navegador y también
-      // arrancaría siempre con los 6 procesos semilla ficticios de ejemplo.
-      const base = session.real ? getProcesos() : []
-      const {procesos:gen}=generarProcesosDesdeCorreos(correosIniciales, base, session.real ? 181 : 5000)
+      // procesos de una sesión real anterior en el mismo navegador y ya no
+      // arranca con procesos semilla ficticios (ver mockFirebase.js).
+      const base = gmailSession ? getProcesos() : []
+      const {procesos:gen}=generarProcesosDesdeCorreos(correosIniciales, base, gmailSession ? 181 : 5000, session.email)
       // Persistir de una vez: si no se guarda aquí, updateProceso() (cerrar,
       // marcar urgente, checklist, acciones de la Mascota…) no encuentra el
-      // proceso en localStorage y la siguiente lectura vuelve a la lista
-      // semilla — pareciendo que la acción "no funcionó".
+      // proceso en localStorage y la siguiente lectura vuelve a una lista
+      // vacía — pareciendo que la acción "no funcionó".
       saveProcesos(gen)
       setProcesos(gen)
+      // Si además hay Firebase, estos procesos generados desde Gmail real
+      // también se comparten en Firestore — para que el resto del equipo
+      // los vea, igual que promete la pantalla de login.
+      if(session.firebase && gmailSession) gen.forEach(p=> saveProcesoFirestore(p))
       setLoading(false)
       if(errorReal){
         showToast('⚠️ No se pudo leer su Gmail real — vea el aviso arriba')
       } else {
-        showToast(session.real ? `✓ ${correosIniciales.length} correos reales — inbox ordenado` : `✓ Modo demostración — ${correosIniciales.length} correos de ejemplo`)
+        showToast(gmailSession ? `✓ ${correosIniciales.length} correos reales — inbox ordenado` : `✓ Modo demostración — ${correosIniciales.length} correos de ejemplo`)
       }
     })()
   },[session])
   useEffect(()=>{
     if(!correos.length) return
-    setAnalisis(correos.map(c=>({correo:c, a:analizarCorreoCompleto(c, procesos.find(p=>p.correos?.includes(c.id))||null)})))
-  },[correos,procesos])
+    setAnalisis(correos.map(c=>({correo:c, a:analizarCorreoCompleto(c, procesos.find(p=>p.correos?.includes(c.id))||null, session?.email)})))
+  },[correos,procesos,session?.email])
 
   const refresh=()=>setProcesos(getProcesos())
   const stats=useMemo(()=>{
@@ -265,7 +295,28 @@ export default function App(){
     return list.sort((a,b)=> (b.a.prioridad.score - a.a.prioridad.score) || (new Date(b.correo.fecha)-new Date(a.correo.fecha)))
   },[analisis,inboxFiltro])
 
-  const plan=[{h:'08:00',t:'Informe operativo — Cali',d:'Corregir Juan Pérez (vence hoy)',pri:'CRITICA'},{h:'09:00',t:'Aprobación María López',d:'Validar y aprobar contratación',pri:'CRITICA'},{h:'09:30',t:'Seguimientos',d:'Proveedor X + Usuarios Epsilon',pri:'ALTA'},{h:'10:00',t:'Certificación Carlos Ruiz',d:'Entregar antes 14:00',pri:'CRITICA'},{h:'11:00',t:'Bloque libre',d:'Colchón para imprevistos',pri:'BAJA'},{h:'14:00',t:'Reprogramación logística',d:'Confirmar lunes con operación',pri:'MEDIA'}]
+  // Antes esto era una lista fija con nombres inventados (Juan Pérez, María
+  // López, Carlos Ruiz…) que se mostraba SIEMPRE, sin importar de quién
+  // fuera la sesión ni qué correos hubiera de verdad — el ejemplo más claro
+  // de "dato quemado" que reportó el Señor. Ahora se arma con los procesos
+  // reales de esta sesión, mismo orden que "Haz estas 3 primero", pero con
+  // más ítems y un colchón libre al final si hay espacio.
+  const planDelDia = useMemo(()=>{
+    const activos=[...procesos].filter(p=>!['CERRADO','COMPLETADO'].includes(p.estado))
+    const orden={CRITICA:4,ALTA:3,MEDIA:2,BAJA:1,INFORMATIVA:0}
+    activos.sort((a,b)=> (orden[b.prioridad]-orden[a.prioridad]) || (new Date(a.fechaLimite)-new Date(b.fechaLimite)))
+    const franjas=['Primero','Después','Luego','Más tarde','Antes de cerrar el día']
+    const items = activos.slice(0,5).map((p,i)=>({h:franjas[i]||`Punto ${i+1}`, t:p.titulo.slice(0,60), d:`${(p.proximaAccion||'Revisar').slice(0,70)} • vence ${p.fechaLimite}`, pri:p.prioridad, id:p.id}))
+    if(items.length) items.push({h:'Colchón', t:'Bloque libre', d:'Deja espacio para imprevistos', pri:'BAJA', id:null})
+    return items
+  },[procesos])
+  // Antes era un "94%" fijo en el sidebar, igual para cualquier sesión y
+  // cualquier bandeja. Ahora es el promedio real de confianza que la IA
+  // calculó para los correos ya analizados de esta sesión.
+  const confianzaProm = useMemo(()=>{
+    if(!analisis.length) return null
+    return Math.round(analisis.reduce((s,x)=>s+(x.a.confianza||0),0)/analisis.length*100)
+  },[analisis])
 
   async function handleSync(){
     setSyncing(true)
@@ -273,19 +324,27 @@ export default function App(){
     audit('sync_gmail',{account: session.email || 'demo', firebase: !!session.firebase})
     let fresh = []
     // Intenta Gmail real (Composio) si hay sesión de Gmail conectada — funciona para Firebase o Composio
-    const gmailSession = await fetchRealSession()
+    const gmailSession = session.real ? await fetchRealSession() : null
+    setGmailConectado(!!gmailSession)
     if(gmailSession){
       try{ fresh = await fetchRealGmail({maxResults:30}) }
       catch(e){ console.error('[handleSync] fetchRealGmail falló:', e.message); setGmailError(e.message); setSyncing(false); showToast('⚠️ No se pudo sincronizar su Gmail real: '+e.message); return }
+    } else if(session.firebase){
+      // Con Google pero sin Gmail conectado: no hay bandeja que traer — los
+      // procesos siguen viniendo de Firestore (suscripción en vivo).
+      setSyncing(false)
+      showToast('ℹ️ Conecte su Gmail para sincronizar su bandeja real')
+      return
     } else {
       fresh = generarCorreosDemo({name:session.nombre, email:session.email})
     }
     setCorreos(fresh)
-    const {procesos:gen}=generarProcesosDesdeCorreos(fresh,procesos, gmailSession ? 181 : 5000)
+    const {procesos:gen}=generarProcesosDesdeCorreos(fresh,procesos, gmailSession ? 181 : 5000, session.email)
     saveProcesos(gen)
     setProcesos(gen)
+    if(session.firebase && gmailSession) gen.forEach(p=> saveProcesoFirestore(p))
     setSyncing(false)
-    showToast(gmailSession ? `✓ Sincronizado: ${fresh.length} correos reales (${gmailSession.email})` : `✓ Actualizado: ${fresh.length} correos de ejemplo — Firestore compartido`)
+    showToast(gmailSession ? `✓ Sincronizado: ${fresh.length} correos reales (${gmailSession.email})` : `✓ Actualizado: ${fresh.length} correos de ejemplo — modo demostración`)
   }
   function marcarCerrado(id){ updateProceso(id,{estado:'CERRADO',fechaCierre:new Date().toISOString()}); refresh(); showToast(`${id} cerrado`)}
   function marcarLeido(id){ setCorreos(c=>c.map(x=> x.id===id? {...x, etiquetas: x.etiquetas.filter(l=>l!=='UNREAD')}:x)); showToast('Marcado leído')}
@@ -311,7 +370,7 @@ export default function App(){
     setSeleccionados(new Set())
   }
   function abrirResponder(correo){
-    const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null)
+    const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null, session?.email)
     const proc = procesos.find(p=> p.correos?.includes(correo.id) || p.hiloId===correo.hiloId) || null
     const hilo = correos.filter(c=> c.hiloId===correo.hiloId).sort((x,y)=> new Date(x.fecha)-new Date(y.fecha))
     const sug = sugerirRespuesta(correo, a, proc, hilo)
@@ -325,14 +384,14 @@ export default function App(){
   function prepararReenvio(proceso){
     const correoBase = correos.find(c=> proceso.correos?.includes(c.id)) || correos.find(c=> c.hiloId===proceso.hiloId)
     if(!correoBase){ showToast('No hay un correo asociado a este proceso para reenviar Señor'); return }
-    const a = analisis.find(x=> x.correo.id===correoBase.id)?.a || analizarCorreoCompleto(correoBase, proceso)
+    const a = analisis.find(x=> x.correo.id===correoBase.id)?.a || analizarCorreoCompleto(correoBase, proceso, session?.email)
     const fwdAsunto = correoBase.asunto.startsWith('Fwd:') ? correoBase.asunto : `Fwd: ${correoBase.asunto}`
     const fwdCuerpo = `\n\n---------- Mensaje reenviado ----------\nDe: ${correoBase.remitente}\nAsunto: ${correoBase.asunto}\nFecha: ${correoBase.fecha}\n\n${correoBase.cuerpo}`
     setConfirmSend(false)
     setReply({ correo: { ...correoBase, remitente:'' }, analisis:a, proceso, sugerencia:{asunto:fwdAsunto, cuerpo:fwdCuerpo, checklist:[], tono:'profesional', confianza:0.9}, asunto:fwdAsunto, cuerpo:fwdCuerpo, modo:'reenviar' })
   }
   function verCorreo(correo){
-    const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null)
+    const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null, session?.email)
     const proc = procesos.find(p=> p.correos?.includes(correo.id) || p.hiloId===correo.hiloId) || null
     setViewCorreo({ correo, a, proc })
   }
@@ -345,7 +404,7 @@ export default function App(){
     setSending(true)
     let ok=false
     try{
-      const res = await responderHilo({ correoOriginal: reply.correo, subject: reply.asunto, body: reply.cuerpo, requiereReal: session.real })
+      const res = await responderHilo({ correoOriginal: reply.correo, subject: reply.asunto, body: reply.cuerpo, requiereReal: gmailConectado })
       audit('enviar_respuesta', { to: reply.correo.remitente, subject: reply.asunto, threadId: reply.correo.hiloId, via: res.via, id: res.id })
       showToast(res.via==='gmail-api' || res.via?.startsWith('composio') ? '✉️ Respuesta enviada por Gmail REAL' : '✉️ Respuesta registrada — inbox actualizado')
       // marcar como respondido: actualizar proceso — solo si el envío fue exitoso
@@ -381,7 +440,7 @@ export default function App(){
       const fwdSubject = targetCorreo.asunto.startsWith('Fwd:') ? targetCorreo.asunto : `Fwd: ${targetCorreo.asunto}`
       const fwdBody = `Hola ${destinatario},\n\nTe reenvío esta solicitud para tu gestión:\n\n---------- Mensaje original ----------\nDe: ${targetCorreo.remitente}\nAsunto: ${targetCorreo.asunto}\nFecha: ${targetCorreo.fecha}\n\n${targetCorreo.cuerpo}\n\nQuedo atenta a tu confirmación.\n\nCordial saludo,\nCoordinación`
       setConfirmSend(false)
-      setReply({ correo: { ...targetCorreo, remitente: '' }, analisis: analizarCorreoCompleto(targetCorreo, proceso), proceso, sugerencia:{ asunto:fwdSubject, cuerpo:fwdBody, checklist:[], tono:'profesional', confianza:0.92 }, asunto:fwdSubject, cuerpo:fwdBody, modo:'reenviar' })
+      setReply({ correo: { ...targetCorreo, remitente: '' }, analisis: analizarCorreoCompleto(targetCorreo, proceso, session?.email), proceso, sugerencia:{ asunto:fwdSubject, cuerpo:fwdBody, checklist:[], tono:'profesional', confianza:0.92 }, asunto:fwdSubject, cuerpo:fwdBody, modo:'reenviar' })
       showToast(`📨 Borrador de reenvío a ${destinatario} preparado — confirme el correo y el envío`)
     } else if(type==='REPROGRAMAR'){
       const newDate = fecha?.iso || new Date(Date.now()+86400000).toISOString().slice(0,10)
@@ -422,8 +481,12 @@ export default function App(){
         </div>
         <div className="top-actions">
           <div className="sync">
-            <span className="mono" style={{fontSize:11,background:'var(--bg2)',border:'1px solid var(--border)',padding:'5px 10px',borderRadius:999,color:'var(--muted)'}}><span style={{width:7,height:7,background:loading?'#f59e0b':(session.real?'#059669':'#94a3b8'),borderRadius:'50%',display:'inline-block',marginRight:7}}/>{session.real ? `GMAIL REAL • ${session.email}` : '🧪 MODO DEMOSTRACIÓN'} • {loading? 'cargando…':`${correos.length} correos`}</span>
-            <button className="btn primary" onClick={handleSync}>{syncing?'Sincronizando…':(session.real?'Sincronizar Gmail':'Actualizar demo')}</button>
+            <span className="mono" style={{fontSize:11,background:'var(--bg2)',border:'1px solid var(--border)',padding:'5px 10px',borderRadius:999,color:'var(--muted)'}}><span style={{width:7,height:7,background:loading?'#f59e0b':(gmailConectado?'#059669':session.firebase?'#2563eb':'#94a3b8'),borderRadius:'50%',display:'inline-block',marginRight:7}}/>{gmailConectado ? `GMAIL REAL • ${session.email}` : session.firebase ? `SESIÓN GOOGLE • ${session.email} • Gmail no conectado` : '🧪 MODO DEMOSTRACIÓN'} • {loading? 'cargando…':`${correos.length} correos`}</span>
+            {(!session.firebase || gmailConectado) ? (
+              <button className="btn primary" onClick={handleSync}>{syncing?'Sincronizando…':(gmailConectado?'Sincronizar Gmail':'Actualizar demo')}</button>
+            ) : (
+              <button className="btn primary" onClick={()=>handleRealConnect({name:session.nombre, email:session.email})}>Conectar Gmail real</button>
+            )}
           </div>
           <button className="theme-toggle" onClick={()=>setTheme(theme==='light'?'dark':'light')} title="Tema">{theme==='light'?'🌙':'☀️'}</button>
           <a href="https://github.com/CamiloGs-univalle/secretaria-operativa-ia/releases" target="_blank" rel="noopener" className="btn" style={{fontSize:12, textDecoration:"none", display:"flex", alignItems:"center", gap:6}} title="App de escritorio">App Escritorio</a>
@@ -433,7 +496,10 @@ export default function App(){
               <div className="user-menu-pop">
                 <div style={{fontWeight:800,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{session.nombre}</div>
                 <div style={{fontSize:12,color:'var(--muted)',margin:'2px 0 8px',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{session.email}</div>
-                <Pill color={session.real?'green':'gray'}>{session.real?'Gmail real conectado':'Modo demostración'}</Pill>
+                <Pill color={gmailConectado?'green':session.firebase?'blue':'gray'}>{gmailConectado?'Gmail real conectado':session.firebase?'Google — Gmail sin conectar':'Modo demostración'}</Pill>
+                {session.firebase && !gmailConectado && (
+                  <button className="btn sm" style={{width:'100%',marginTop:8,justifyContent:'center'}} onClick={()=>handleRealConnect({name:session.nombre, email:session.email})}>Conectar mi Gmail real</button>
+                )}
                 <button className="btn sm ghost" style={{width:'100%',marginTop:12,justifyContent:'center'}} onClick={handleLogout}>Cerrar sesión</button>
               </div>
             )}
@@ -468,19 +534,21 @@ export default function App(){
             <div className="mono" style={{fontSize:11,lineHeight:1.6,color:'var(--muted)'}}>Gmail desordenado → IA clasifica → Inbox con: Requieren acción, Urgentes, Hoy, Esta semana.<br/>Todo filtrable y archivable.</div>
             <div style={{marginTop:10,display:'flex',gap:6,flexWrap:'wrap'}}><Pill color="blue">Tiempo real</Pill><Pill color="green">Ordenado</Pill></div>
           </div>
-          <div className="confianza-card"><div style={{fontSize:12,fontWeight:800}}>Confianza IA 94%</div><div style={{fontSize:11,color:'var(--muted)',margin:'4px 0 8px'}}>95-100 auto • 80-94 revisión • &lt;60 no actuar</div><div className="bar"><div style={{width:'94%'}}/></div></div>
+          <div className="confianza-card"><div style={{fontSize:12,fontWeight:800}}>Confianza IA {confianzaProm==null?'—':`${confianzaProm}%`}</div><div style={{fontSize:11,color:'var(--muted)',margin:'4px 0 8px'}}>95-100 auto • 80-94 revisión • &lt;60 no actuar</div><div className="bar"><div style={{width:`${confianzaProm??0}%`}}/></div></div>
         </nav>
 
         <main className="main">
           {tab==='dashboard' && (
             <>
               <div className="live-banner">
-                {session.real ? (
+                {gmailConectado ? (
                   <span className="mono live-label">🔴 DATOS REALES — {session.email} • {correos.length} correos analizados • Inbox ordenado por prioridad</span>
+                ) : session.firebase ? (
+                  <span className="mono live-label">🔵 SESIÓN GOOGLE — {session.email} • Firestore compartido • Gmail aún no conectado</span>
                 ) : (
                   <span className="mono live-label">🧪 MODO DEMOSTRACIÓN — {correos.length} correos de ejemplo • ningún dato real de Proservis</span>
                 )}
-                <span style={{fontSize:11,color:'var(--muted)'}}>{session.real ? <>Live <b>/api/gmail/live</b> en producción</> : 'Conecte su Gmail real cuando quiera dejar de probar'}</span>
+                <span style={{fontSize:11,color:'var(--muted)'}}>{gmailConectado ? <>Live <b>/api/gmail/live</b> en producción</> : session.firebase ? <button className="btn sm" onClick={()=>handleRealConnect({name:session.nombre, email:session.email})}>Conectar Gmail real →</button> : 'Conecte su Gmail real cuando quiera dejar de probar'}</span>
               </div>
 
               <div className="section-label">Resumen ejecutivo</div>
@@ -522,10 +590,11 @@ export default function App(){
                   </div>
                 </div>
                 <div className="card">
-                  <div className="card-head"><h3>📅 Plan del día — automático</h3><small style={{color:'var(--muted)'}}>Deja 30% libre para imprevistos</small></div>
+                  <div className="card-head"><h3>📅 Plan del día — de tus procesos reales</h3><small style={{color:'var(--muted)'}}>Ordenado por prioridad y fecha límite</small></div>
                   <div className="timeline-plan">
-                    {plan.map(p=>(
-                      <div key={p.h} className="plan-row">
+                    {!planDelDia.length && <div className="empty-state">Sin procesos activos todavía — aparecerán en cuanto sincronice su correo.</div>}
+                    {planDelDia.map((p,i)=>(
+                      <div key={p.id||p.h+i} className="plan-row" role={p.id?'button':undefined} tabIndex={p.id?0:undefined} style={p.id?{cursor:'pointer'}:undefined} onClick={p.id?()=>{const proc=procesos.find(x=>x.id===p.id); if(proc){setSel(proc); setTab('procesos')}}:undefined}>
                         <div className="plan-h">{p.h}</div><div className={`plan-dot ${p.pri==='CRITICA'?'crit':p.pri==='ALTA'?'alta':'mid'}`} />
                         <div style={{flex:1}}><div style={{fontWeight:600,fontSize:13}}>{p.t}</div><div style={{fontSize:12,color:'var(--muted)'}}>{p.d}</div></div>
                         <Pill color={p.pri==='CRITICA'?'red':p.pri==='ALTA'?'orange':'gray'}>{p.pri}</Pill>
@@ -772,7 +841,19 @@ export default function App(){
 
           {tab==='auditoria' && (
             <div className="card">
-              <div className="card-head"><h3>🛡️ Auditoría — todo lo que se hizo, registrado</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Nada se envía ni se cierra sin que quede aquí</span></div>
+              <div className="card-head">
+                <h3>🛡️ Auditoría — todo lo que se hizo, registrado</h3>
+                <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                  <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Nada se envía ni se cierra sin que quede aquí</span>
+                  {session.firebase && (
+                    <button className="btn sm ghost" title="Borra los 6 procesos de ejemplo (María López, Juan Pérez, Carlos Ruiz…) si quedaron guardados en Firestore por versiones anteriores de la app" onClick={async()=>{
+                      const r = await limpiarDatosDeEjemploFirestore()
+                      if(r.ok) showToast(`🧹 Datos de ejemplo eliminados de Firestore (${r.borrados})`)
+                      else showToast('⚠️ '+(r.razon||'No se pudo limpiar'))
+                    }}>🧹 Limpiar datos de ejemplo</button>
+                  )}
+                </div>
+              </div>
               <p style={{fontSize:12,color:'var(--muted)',lineHeight:1.6,margin:'0 0 12px'}}>Cada vez que se sincroniza Gmail, se envía una respuesta o se marca algo urgente, queda una línea aquí — así siempre puede revisar qué pasó y cuándo, para su tranquilidad.</p>
               <div style={{display:'grid',gap:8}}>
                 {(()=>{
@@ -848,7 +929,7 @@ export default function App(){
               </div>
             </div>
             <div className="reply-actions">
-              <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{session.real ? `Gmail REAL • vía ${session.email}` : 'Modo demostración — envío simulado'}{reply.modo==='reenviar' ? ` • reenvío a ${reply.correo.remitente||'—'}` : ` • a ${reply.correo.remitente.split('<')[0].trim()}`}</span>
+              <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{gmailConectado ? `Gmail REAL • vía ${session.email}` : 'Modo demostración — envío simulado'}{reply.modo==='reenviar' ? ` • reenvío a ${reply.correo.remitente||'—'}` : ` • a ${reply.correo.remitente.split('<')[0].trim()}`}</span>
               <div style={{display:'flex',gap:8}}>
                 <button className="btn ghost" onClick={()=>{setReply(null); setConfirmSend(false)}} disabled={sending}>Cancelar</button>
                 <button

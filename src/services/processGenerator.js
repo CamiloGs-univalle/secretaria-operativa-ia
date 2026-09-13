@@ -9,7 +9,7 @@ import { analizarCorreoCompleto } from '../engine/emailEngine.js'
 // No es una fuga de datos (el contenido es 100% demo), pero un ID
 // coincidente confunde. Con folioBase distinto, demo y real nunca comparten
 // un mismo folio en el mismo navegador.
-export function generarProcesosDesdeCorreos(correos, procesosExistentes=[], folioBase=181){
+export function generarProcesosDesdeCorreos(correos, procesosExistentes=[], folioBase=181, miEmail=null){
   const porHilo = {}
   correos.forEach(c=>{
     if(!porHilo[c.hiloId]) porHilo[c.hiloId]=[]
@@ -29,7 +29,7 @@ export function generarProcesosDesdeCorreos(correos, procesosExistentes=[], foli
     // ordenar por fecha
     msgs.sort((a,b)=> new Date(a.fecha) - new Date(b.fecha))
     const principal = msgs[0]
-    const analisis = analizarCorreoCompleto(principal, null)
+    const analisis = analizarCorreoCompleto(principal, null, miEmail)
     // si no es relevante, no crea proceso
     if(!analisis.relevancia.esRelevante) return
 
