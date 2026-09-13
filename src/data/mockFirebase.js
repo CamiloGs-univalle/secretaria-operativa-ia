@@ -2,8 +2,21 @@
 // - Si hay usuario Firebase autenticado (cualquier Google) → Firestore es la verdad, compartida entre todos los correos.
 // - Si no hay sesión Firebase (demo/offline) → localStorage como antes.
 // - Namespace demo/real separado para que demo no mezcle con real en mismo navegador.
+//
+// IMPORTANTE — antes esto sembraba datos falsos como si fueran reales: en
+// cuanto Firestore (o el localStorage de una sesión real) estaba vacío, se
+// devolvían los 6 "_procesos" de ejemplo (María López, Juan Pérez, Carlos
+// Ruiz…) como si fueran procesos de verdad, y encima se ESCRIBÍAN en
+// Firestore compartido — así que la primera persona en entrar con Google
+// contaminaba la base para todo el equipo. Eso es exactamente el reporte de
+// "veo datos quemados". Ahora una sesión real (Firebase o no) que no tiene
+// nada guardado empieza con una bandeja vacía de verdad: los procesos solo
+// aparecen cuando se generan desde correos reales (ver processGenerator.js).
+// `_procesosEjemploLegacy` ya NO se usa como semilla — se conserva solo para
+// que `limpiarDatosDeEjemploFirestore()` sepa qué IDs borrar si alguien los
+// alcanzó a sembrar en Firestore antes de este arreglo.
 import { db, auth } from '../lib/firebase.js'
-import { collection, doc, setDoc, getDocs, onSnapshot, query, orderBy } from 'firebase/firestore'
+import { collection, doc, deleteDoc, setDoc, getDocs, onSnapshot, query, orderBy, addDoc } from 'firebase/firestore'
 
 let NS = ''
 export function setModoAlmacenamiento(esDemo){ NS = esDemo ? '_demo' : '' }
@@ -11,7 +24,10 @@ function keyProcesos(){ return `soia_procesos_v1${NS}` }
 function keyAudit(){ return `soia_audit${NS}` }
 export const ESTADOS = { NUEVO:'NUEVO', CLASIFICADO:'CLASIFICADO', PENDIENTE:'PENDIENTE', EN_PROCESO:'EN_PROCESO', ESPERANDO:'ESPERANDO', SEGUIMIENTO:'SEGUIMIENTO', COMPLETADO:'COMPLETADO', CERRADO:'CERRADO', BLOQUEADO:'BLOQUEADO', VENCIDO:'VENCIDO', REPROGRAMADO:'REPROGRAMADO', CANCELADO:'CANCELADO', CON_INCIDENCIA:'CON_INCIDENCIA' }
 
-let _procesos = [
+// Legacy: contenido 100% ficticio. Ya NO se usa para sembrar Firestore ni
+// localStorage — solo lo lee limpiarDatosDeEjemploFirestore() para saber qué
+// IDs borrar si Firestore ya los tenía guardados de antes de este arreglo.
+let _procesosEjemploLegacy = [
   {
     id:'PROC-00182', titulo:'Contratación — María López — Auxiliar Administrativo XYZ', descripcion:'Validar documentación de María López para cargo auxiliar administrativo empresa XYZ antes del viernes',
     origen:'Gmail', categoria:'Contratación', responsable:'Coordinadora', area:'Operaciones', prioridad:'CRITICA', estado:'EN_PROCESO', etapa:'ESPERANDO_APROBACION',
@@ -61,9 +77,13 @@ export const correosMock=[
 
 function isFirebaseMode(){ return !!auth.currentUser && !NS } // demo nunca va a Firestore
 
+// Antes: `NS ? [] : _procesos` — una sesión real con localStorage vacío
+// (siempre, la primera vez) recibía los 6 procesos de ejemplo como si fueran
+// reales. Ahora ninguna sesión arranca con datos inventados: vacío es vacío,
+// hasta que se generen procesos reales desde correos reales.
 export function loadProcesos(){
   try{ const v=localStorage.getItem(keyProcesos()); if(v) return JSON.parse(v)}catch{}
-  return NS ? [] : _procesos
+  return []
 }
 export function saveProcesos(list){ try{ localStorage.setItem(keyProcesos(), JSON.stringify(list))}catch{} }
 export function getProcesos(){ return loadProcesos() }
@@ -74,18 +94,35 @@ export async function fetchProcesosFirestore(){
   if(!isFirebaseMode()) return null
   try{
     const snap = await getDocs(collection(db, 'procesos'))
-    if(snap.empty) {
-      // Seed inicial: sube _procesos si está vacío (solo primera vez)
-      for(const p of _procesos){
-        await setDoc(doc(db, 'procesos', p.id), { ...p, createdAt: new Date().toISOString() })
-      }
-      return _procesos
-    }
+    // Antes: si la colección estaba vacía, se sembraban los 6 procesos de
+    // ejemplo directo en Firestore compartido — la primera persona en entrar
+    // con Google convertía esos datos ficticios en "los datos del equipo"
+    // para siempre. Ahora una colección vacía se queda vacía: los procesos
+    // reales llegan solos en cuanto alguien conecta su Gmail y se generan
+    // desde correos de verdad (ver processGenerator.js / saveProcesoFirestore).
+    if(snap.empty) return []
     const list = snap.docs.map(d=> d.data())
     // Cache local para offline
     saveProcesos(list)
     return list
   }catch(e){ console.warn('[Firestore] fetchProcesos', e.message); return null }
+}
+
+// Borra en Firestore los 6 documentos de ejemplo si quedaron sembrados ahí
+// por el bug anterior (antes de este arreglo). Segura de llamar aunque ya no
+// existan — deleteDoc en un id inexistente no falla. Úsese una sola vez
+// desde Auditoría → "Limpiar datos de ejemplo" si el equipo los ve.
+export async function limpiarDatosDeEjemploFirestore(){
+  if(!auth.currentUser) return { ok:false, razon:'Debes iniciar sesión con Google primero.' }
+  let borrados = 0
+  // También limpia la copia en caché local (localStorage) de este
+  // navegador — si no, aunque Firestore quede limpio, loadProcesos() sigue
+  // devolviendo la caché local con los 6 ejemplos hasta el próximo cambio.
+  try{ localStorage.removeItem(keyProcesos()) }catch{}
+  for(const p of _procesosEjemploLegacy){
+    try{ await deleteDoc(doc(db, 'procesos', p.id)); borrados++ }catch(e){ console.warn('[Firestore] limpiar', p.id, e.message) }
+  }
+  return { ok:true, borrados }
 }
 
 export function subscribeProcesosFirestore(cb){
@@ -121,7 +158,7 @@ export function addProceso(p){
   if(isFirebaseMode()) saveProcesoFirestore(p)
   return p
 }
-export function resetMock(){ localStorage.removeItem(keyProcesos()); return NS ? [] : _procesos }
+export function resetMock(){ localStorage.removeItem(keyProcesos()); return [] }
 
 // auditoria — dual: local + Firestore
 export function audit(action, extra={}){
@@ -132,9 +169,7 @@ export function audit(action, extra={}){
     localStorage.setItem(keyAudit(), JSON.stringify(logs.slice(0,200)))
   }catch(e){ console.error('[audit] local', e.message) }
   if(isFirebaseMode()){
-    import('firebase/firestore').then(({ collection, addDoc })=>{
-      addDoc(collection(db, 'auditoria'), entry).catch(()=>{})
-    })
+    addDoc(collection(db, 'auditoria'), entry).catch(()=>{})
   }
 }
 export function getAuditLog(){

@@ -47,11 +47,20 @@ export function analizarRelevancia(email, clasif){
   return {esRelevante:false, score:35, razon:'Informativo o confirmación', nivel:'BAJA'}
 }
 
-export function detectarResponsable(email, coordEmail='coordinadora@proservis.com.co'){
+// miEmail: el correo de la cuenta real conectada (session.email). Antes esta
+// función solo reconocía la palabra "coordinadora" o el correo fijo de
+// Proservis — es decir, para CUALQUIER otra persona que conectara su propio
+// Gmail (justo lo que ahora permite el login con Google), su bandeja nunca
+// calzaba con "coordinadora" y la función solo llegaba al último fallback
+// genérico. Ahora, si se conoce el correo real de la sesión, también cuenta
+// como "va dirigido a mí" cuando aparece en TO/CC — generaliza el turno
+// COORDINADORA/OTRA_PERSONA a cualquier cuenta, no solo la fija de Proservis.
+export function detectarResponsable(email, miEmail=null, coordEmail='coordinadora@proservis.com.co'){
   const to=(email.destinatarios||[]).join(' ').toLowerCase()
   const cc=(email.cc||[]).join(' ').toLowerCase()
-  const coordInTo = to.includes('coordinadora') || to.includes(coordEmail.toLowerCase())
-  const coordInCc = cc.includes('coordinadora') || cc.includes(coordEmail.toLowerCase())
+  const miEmailLower = (miEmail||'').trim().toLowerCase()
+  const coordInTo = to.includes('coordinadora') || to.includes(coordEmail.toLowerCase()) || (!!miEmailLower && to.includes(miEmailLower))
+  const coordInCc = cc.includes('coordinadora') || cc.includes(coordEmail.toLowerCase()) || (!!miEmailLower && cc.includes(miEmailLower))
   const body=email.cuerpo||''
   // Si está en TO y hay solicitud directa
   if(coordInTo) return {responsablePrincipal:'COORDINADORA', esParaCoordinadora:true, esCC:false, confianza:0.97, turno:'COORDINADORA'}
@@ -160,11 +169,11 @@ export function detectarEntidades(email){
 }
 
 // Pipeline 15 preguntas
-export function analizarCorreoCompleto(email, contextoProceso=null){
+export function analizarCorreoCompleto(email, contextoProceso=null, miEmail=null){
   const norm=normalizarEmail(email)
   const clasif=clasificar(norm)
   const relevancia=analizarRelevancia(norm, clasif)
-  const responsable=detectarResponsable(norm)
+  const responsable=detectarResponsable(norm, miEmail)
   const fechas=detectarFechas(norm)
   const entidades=detectarEntidades(norm)
   const respTipo=tipoRespuesta(norm)
