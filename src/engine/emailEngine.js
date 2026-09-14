@@ -160,10 +160,57 @@ export function checklistRespuesta(email){
   return items
 }
 
+// Antes "qué esperan de usted" era literalmente la primera frase del cuerpo
+// del correo recortada a 120 caracteres — es decir, se repetía casi la misma
+// frase que ya se veía en la vista previa del correo, dos veces en la misma
+// tarjeta (una vez como resumen, otra vez como "acción esperada"). Eso iba
+// justo en contra de "que sea fácil de entender": no traducía nada, solo
+// repetía. Ahora se sintetiza una frase corta y accionable según el tipo de
+// correo — lo que realmente hay que HACER, no lo que el correo DICE.
+// Preguntas del checklist que ya son un nombre concreto de dato (no una frase
+// genérica tipo "Responder solicitud principal") — solo esas se pueden
+// insertar dentro de "confirmar ___" sin sonar raro.
+const TEMAS_CONCRETOS = ['Cantidad de personas','Fecha de ingreso','Ciudad / Sede','Cargo','Documentación adjunta']
+function describirAccionEsperada(tipo, checklist=[], fechas={}){
+  const fechaTxt = fechas.fechaCalculada ? ` antes del ${fechas.fechaCalculada}` : ''
+  const temaConcreto = (checklist||[]).find(c=>!c.done && TEMAS_CONCRETOS.includes(c.q))?.q
+  switch(tipo){
+    case CATEGORIAS.URGENTE:
+      return `Responder hoy mismo${fechaTxt || ' — es urgente'}${temaConcreto? `: confirmar ${temaConcreto.toLowerCase()}`:''}`
+    case CATEGORIAS.INCIDENCIA:
+      return `Confirmar cómo se va a resolver el problema reportado${fechaTxt}`
+    case CATEGORIAS.SOLICITUD:
+      return temaConcreto
+        ? `Confirmar ${temaConcreto.toLowerCase()}${fechaTxt}`
+        : `Responder con la información o aprobación que piden${fechaTxt}`
+    case CATEGORIAS.SEGUIMIENTO:
+      return 'Dar una actualización de en qué va este proceso'
+    default:
+      return `Responder a este correo${fechaTxt}`
+  }
+}
+
+// Frases comunes que empiezan con mayúscula y no son un nombre de persona —
+// para que el patrón general de "dos palabras con mayúscula" de abajo no las
+// confunda con un nombre.
+const RE_FALSO_NOMBRE = /^(Buenos días|Buen día|Buenas tardes|Buenas noches|Cordial saludo|Muchas gracias|Quedo atenta|Quedo atento|Nos vemos|Por favor|Sede Cali|Sede Bogotá)/i
 export function detectarEntidades(email){
   const body=email.cuerpo||''
-  const persona=body.match(/(?:colaborador|señor|señora|usuario)\s+([A-ZÁÉÍÓÚ][a-záéí]+ [A-ZÁÉÍÓÚ][a-záéí]+)/)?.[1] || body.match(/Juan Pérez|María López|María del Mar|Carlos|Yeferson/i)?.[0] || null
-  const empresa=body.match(/empresa\s+([A-Z]+)/i)?.[1] || body.match(/Proservis|ABC|XYZ/i)?.[0] || null
+  // Antes esto buscaba un puñado de nombres escritos a mano (Juan Pérez,
+  // María López, Carlos, Yeferson…) — funcionaba solo para el correo de
+  // ejemplo/demo, y para cualquier correo real de un cliente (con nombres
+  // distintos) esto nunca detectaba a nadie. Ahora usa un patrón general:
+  // primero busca "colaborador/señor/señora/usuario NombreApellido" (más
+  // confiable), y si no encuentra eso, cualquier "Nombre Apellido" con
+  // mayúscula inicial que no sea una frase de cortesía común.
+  const explicito = body.match(/(?:colaborador|señor|señora|usuario)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+ [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)/)?.[1]
+  const generico = !explicito ? [...body.matchAll(/\b([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+ [A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)\b/g)].map(m=>m[1]).find(n=>!RE_FALSO_NOMBRE.test(n)) : null
+  const persona = explicito || generico || null
+  // "empresa XYZ" (nombre de un tercero mencionado) — Proservis es la propia
+  // empresa del cliente, así que se reconoce aparte sin depender de una
+  // lista de ejemplos ficticios (ABC/XYZ ya no se buscan como si fueran
+  // nombres reales de proveedores).
+  const empresa=body.match(/empresa\s+([A-ZÁÉÍÓÚÑ][\wÁÉÍÓÚÑáéíóúñ.&-]*)/)?.[1] || body.match(/\bProservis\b/i)?.[0] || null
   const cargo=body.match(/cargo de ([a-záéíóú\s]+)/i)?.[1] || null
   return {persona, empresa, cargo}
 }
@@ -183,7 +230,7 @@ export function analizarCorreoCompleto(email, contextoProceso=null, miEmail=null
   const prioridad=calcularPrioridad({clasif, relevancia, responsable, fechas, diasTranscurridos: contextoProceso? Math.floor((Date.now()-new Date(contextoProceso.creado).getTime())/86400000):0, bloqueaSiguiente: /bloquea|depende|sin esto no/i.test(norm.cuerpoNorm) })
 
   const esperanRespuesta = relevancia.esRelevante && responsable.turno==='COORDINADORA' && [CATEGORIAS.SOLICITUD, CATEGORIAS.SEGUIMIENTO, CATEGORIAS.URGENTE, CATEGORIAS.INCIDENCIA].includes(clasif.tipo)
-  const accionEsperada = esperanRespuesta ? (norm.cuerpo.slice(0,120).split('.')[0] || 'Responder solicitud') : 'Seguimiento / Observación'
+  const accionEsperada = esperanRespuesta ? describirAccionEsperada(clasif.tipo, checklist, fechas) : 'Seguimiento / Observación'
   const replyReadiness = esperanRespuesta ? (checklist.length>2 ? 'PARTIAL' : 'READY') : 'NO_REPLY_NEEDED'
 
   // matching proceso: threadId exacto -> alta confianza
@@ -224,8 +271,8 @@ export function filtrarCorreosIrrelevantes(correos){
   })
 }
 
-// Sugerencia de respuesta con contexto completo (15 preguntas + hilo)
-export function sugerirRespuesta(correo, analisis, proceso=null, hilo=[]){
+// Sugerencia de respuesta con contexto completo (15 preguntas + hilo) — 100% dinámico por sesión
+export function sugerirRespuesta(correo, analisis, proceso=null, hilo=[], session=null){
   const nombreRemitente = (correo.remitente||'').split('<')[0].trim().split(' ')[0] || 'buen día'
   const esSolicitud = analisis.clasificacion.tipo==='SOLICITUD' || analisis.clasificacion.tipo==='URGENTE'
   const esIncidencia = analisis.incidencia.existe
@@ -235,11 +282,14 @@ export function sugerirRespuesta(correo, analisis, proceso=null, hilo=[]){
   let asunto = correo.asunto.startsWith('Re:')||correo.asunto.startsWith('RE:') ? correo.asunto : `Re: ${correo.asunto}`
   let cuerpo = ''
   let tono = 'profesional y cordial'
+  const firmaNombre = session?.nombre || 'Coordinación'
+  const firmaEmail = session?.email || ''
+  const firmaLinea = firmaEmail ? `${firmaNombre} • ${firmaEmail}` : firmaNombre
 
   if(esIncidencia){
-    cuerpo = `Hola ${nombreRemitente},\n\nGracias por informar la incidencia.\n\nHe tomado nota de: "${analisis.incidencia.descripcion?.slice(0,120)}"\nQuedo atenta a la solución y al nuevo compromiso${fechaLim? ` para el ${fechaLim}`:''}.\n${proceso? `Proceso: ${proceso.id} — ${proceso.titulo}. `:''}¿Podrías confirmarme la nueva fecha y el responsable?\n\nQuedo atenta,\nCoordinación — Proservis\n`
+    cuerpo = `Hola ${nombreRemitente},\n\nGracias por informar la incidencia.\n\nHe tomado nota de: "${analisis.incidencia.descripcion?.slice(0,120)}"\nQuedo atenta a la solución y al nuevo compromiso${fechaLim? ` para el ${fechaLim}`:''}.\n${proceso? `Proceso: ${proceso.id} — ${proceso.titulo}. `:''}¿Podrías confirmarme la nueva fecha y el responsable?\n\nQuedo atenta,\n${firmaLinea}\n`
   } else if(esReprogram){
-    cuerpo = `Hola ${nombreRemitente},\n\nEntendido el cambio de fecha${fechaLim? ` al ${fechaLim}`:''}.\nHe actualizado el proceso${proceso? ` ${proceso.id}`:''} y ajustado el seguimiento.\nConfirmo que quedamos para ${fechaLim || 'la nueva fecha'}.\n\nSi hay impacto adicional me avisas por favor.\n\nCordial saludo,\nCoordinación — Proservis\n`
+    cuerpo = `Hola ${nombreRemitente},\n\nEntendido el cambio de fecha${fechaLim? ` al ${fechaLim}`:''}.\nHe actualizado el proceso${proceso? ` ${proceso.id}`:''} y ajustado el seguimiento.\nConfirmo que quedamos para ${fechaLim || 'la nueva fecha'}.\n\nSi hay impacto adicional me avisas por favor.\n\nCordial saludo,\n${firmaLinea}\n`
   } else if(esSolicitud){
     const pendientes = checklist.filter(c=>!c.done).map(c=>`• ${c.q}`).join('\n')
     cuerpo = `Hola ${nombreRemitente},\n\nGracias por tu correo.\n\n` +
@@ -247,13 +297,13 @@ export function sugerirRespuesta(correo, analisis, proceso=null, hilo=[]){
       (fechaLim? `Entiendo el compromiso para ${fechaLim}. `:'' ) +
       `Te confirmo en el transcurso del día con la información completa.\n\n`+
       (proceso? `Referencia: ${proceso.id}\n`:'') +
-      `Quedo atenta,\nCoordinación — Proservis\nAuxiliar TI • auxiliar.ti@proservis.com.co`
+      `Quedo atenta,\n${firmaLinea}`
   } else if(analisis.clasificacion.tipo==='SEGUIMIENTO'){
-    cuerpo = `Hola ${nombreRemitente},\n\nGracias por el seguimiento.\nEn este momento ${analisis.turno.accionEsperadaDe==='COORDINADORA' ? 'estoy finalizando la gestión y te envío actualización hoy' : 'estamos a la espera de respuesta externa y haré seguimiento' }.\nTe confirmo en breve.\n\nSaludos,\nCoordinación\n`
+    cuerpo = `Hola ${nombreRemitente},\n\nGracias por el seguimiento.\nEn este momento ${analisis.turno.accionEsperadaDe==='COORDINADORA' ? 'estoy finalizando la gestión y te envío actualización hoy' : 'estamos a la espera de respuesta externa y haré seguimiento' }.\nTe confirmo en breve.\n\nSaludos,\n${firmaNombre}\n`
   } else if(analisis.finalizacion.posibleFinalizacion){
-    cuerpo = `Hola ${nombreRemitente},\n\nPerfecto, gracias por confirmar.\nHe marcado el proceso como posible cierre${proceso? ` (${proceso.id})`:''}. Quedo atenta si surge algo adicional.\n\nSaludos cordiales,\nCoordinación\n`
+    cuerpo = `Hola ${nombreRemitente},\n\nPerfecto, gracias por confirmar.\nHe marcado el proceso como posible cierre${proceso? ` (${proceso.id})`:''}. Quedo atenta si surge algo adicional.\n\nSaludos cordiales,\n${firmaNombre}\n`
   } else {
-    cuerpo = `Hola ${nombreRemitente},\n\nGracias por tu mensaje.\nHe recibido tu correo "${correo.asunto.slice(0,60)}" y lo tengo en seguimiento.\nTe respondo con detalle en breve.\n\nCordial saludo,\nCoordinación — Proservis\n`
+    cuerpo = `Hola ${nombreRemitente},\n\nGracias por tu mensaje.\nHe recibido tu correo "${correo.asunto.slice(0,60)}" y lo tengo en seguimiento.\nTe respondo con detalle en breve.\n\nCordial saludo,\n${firmaNombre}\n`
   }
 
   // hilo contexto (últimos 2 correos del hilo)

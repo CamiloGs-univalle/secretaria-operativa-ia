@@ -1,20 +1,12 @@
-// /api/processes — Firestore CRUD + Sheets sync + Auditoría (doc 30, 32, 51)
-export default async function handler(req,res){
-  const { method } = req
-  // Firebase Admin SDK (backend seguro, tokens nunca en frontend)
-  // const db = admin.firestore()
-  if(method==='GET') return res.json({ procesos: [], total: 0, note:'Firestore collection: procesos (fuente de verdad)' })
-  if(method==='POST'){
-    const proc = req.body
-    // idempotente: si emailId ya existe, no crear duplicado (RNF012)
-    // await db.collection('procesos').doc(proc.id).set(proc, { merge:true })
-    // await syncSheets(proc) // Google Sheets API + Apps Script (doc 35)
-    // await audit({ usuario:'system', accion:'crear_proceso', proceso: proc.id, confianza: proc.confianza })
-    return res.json({ ok:true, id: proc.id, sheets:'synced' })
-  }
-  if(method==='PATCH'){
-    // update estado, prioridad, etc — Action Guard valida
-    return res.json({ ok:true, guard:'confirmación requerida para cerrar/enviar' })
-  }
-  return res.status(405).end()
+// Este endpoint quedó en desuso: el frontend lee y escribe procesos
+// directamente contra Firestore (ver src/data/mockFirebase.js), nunca contra
+// esta ruta. Antes respondía siempre 200 con un "sheets: 'synced'" y un
+// "ok: true" inventados, sin hacer nada real — quien lo llamara (por
+// ejemplo, inspeccionando la pestaña Red del navegador) podía creer que
+// existía una sincronización que en realidad nunca ocurrió. Este archivo no
+// se pudo borrar desde aquí (sin acceso de shell a este equipo); se deja
+// como un 410 honesto en vez de fingir éxito. Es seguro borrar la carpeta
+// api/processes/ por completo.
+export default async function handler(req, res){
+  res.status(410).json({ error:'no_implementado', note:'Este endpoint no está en uso — los procesos se leen/escriben directo desde el frontend contra Firestore (src/data/mockFirebase.js).' })
 }

@@ -9,6 +9,12 @@ import { analizarCorreoCompleto } from '../engine/emailEngine.js'
 // No es una fuga de datos (el contenido es 100% demo), pero un ID
 // coincidente confunde. Con folioBase distinto, demo y real nunca comparten
 // un mismo folio en el mismo navegador.
+// `miEmail` ahora también se guarda en cada proceso como `propietario` — antes
+// no se registraba de quién era cada proceso, así que en Firestore
+// (compartido entre las 4 personas que usan la app) todos los procesos se
+// veían mezclados sin poder distinguir a quién pertenecía cada uno. Con
+// `propietario`, mockFirebase.js puede filtrar por correo y cada persona ve
+// solo lo suyo — ver fetchProcesosFirestore/subscribeProcesosFirestore.
 export function generarProcesosDesdeCorreos(correos, procesosExistentes=[], folioBase=181, miEmail=null){
   const porHilo = {}
   correos.forEach(c=>{
@@ -33,8 +39,11 @@ export function generarProcesosDesdeCorreos(correos, procesosExistentes=[], foli
     // si no es relevante, no crea proceso
     if(!analisis.relevancia.esRelevante) return
 
-    // buscar proceso existente por hilo
-    let proc = procesos.find(p=> p.hiloId===hiloId || p.correos?.includes(principal.id))
+    // buscar proceso existente por hilo — solo dentro de los procesos del
+    // mismo propietario (procesosExistentes ya viene filtrado por dueño desde
+    // Firestore, pero se valida aquí también por si se llega a llamar con una
+    // lista sin filtrar, para nunca fusionar el hilo de una persona con el de otra).
+    let proc = procesos.find(p=> (p.hiloId===hiloId || p.correos?.includes(principal.id)) && (p.propietario||null)===(miEmail||null))
     if(proc){
       // actualizar con nuevo correo
       proc.correos = [...new Set([...(proc.correos||[]), ...msgs.map(m=>m.id)])]
@@ -52,6 +61,7 @@ export function generarProcesosDesdeCorreos(correos, procesosExistentes=[], foli
     const titulo = principal.asunto.slice(0,65) || `Proceso ${hiloId.slice(0,6)}`
     const nuevo = {
       id, hiloId,
+      propietario: miEmail || null,
       titulo,
       descripcion: principal.cuerpo.slice(0,220),
       origen: 'Gmail',

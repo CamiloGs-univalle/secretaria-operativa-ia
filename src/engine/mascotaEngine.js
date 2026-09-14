@@ -37,12 +37,15 @@ function computeStats(procesos){
 }
 
 // Genera mensaje de recordatorio según hora (sec 21: 8:00,11:00,14:00,17:00)
-export function generarRecordatorio(hora, { procesos=[], stats=null }={}){
+// El saludo de las 8am antes decía siempre "¡Buenos días Coordinadora!" sin
+// importar quién tuviera la sesión abierta — se generaliza con el nombre
+// real de quien esté usando la app (o un saludo neutro si no se conoce).
+export function generarRecordatorio(hora, { procesos=[], stats=null, nombre=null }={}){
   const s = stats || computeStats(procesos)
   const crit = s.crit, alta=s.alta, venc=s.venc, total=s.total
   const vencTxt = venc? ` ⚠️ ${venc} vencida(s)` : ''
   const map={
-    8:  `¡Buenos días Coordinadora! ☀️ Resumen inicial: ${crit} críticas, ${alta} altas, ${total} procesos activos.${vencTxt} Te recomiendo empezar por las críticas.`,
+    8:  `¡Buenos días${nombre?' '+nombre:''}! ☀️ Resumen inicial: ${crit} críticas, ${alta} altas, ${total} procesos activos.${vencTxt} Te recomiendo empezar por las críticas.`,
     11: `Actualización 11:00 🟡 Tienes ${crit} críticas y ${s.enProc} en proceso. ${venc?`Atención: ${venc} vencida(s).`:''} ¿Avanzamos con la siguiente?`,
     14: `Revisión de la tarde 14:00 🟠 Quedan ${s.esperando} esperando respuesta externa. Recuerda dejar 30% libre para imprevistos.`,
     17: `Cierre del día 17:00 📋 Resumen: ${total} procesos, ${venc} vencidos, ${crit} críticos. ¿Marcamos algún proceso como listo?`,

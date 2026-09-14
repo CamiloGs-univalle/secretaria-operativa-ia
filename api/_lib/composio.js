@@ -44,6 +44,22 @@ export async function estadoConexion(connectedAccountId){
   return { ok: r.ok, status: j.status || j.data?.status, raw: j }
 }
 
+// Pregunta a Gmail (vía la cuenta ya conectada) cuál es su propia dirección
+// real — GMAIL_GET_PROFILE es el equivalente de users.getProfile de la API
+// de Gmail y devuelve emailAddress. Se usa para VERIFICAR que la cuenta de
+// Google que de verdad completó el consentimiento es la misma que la
+// persona dijo que iba a conectar — Google no obliga a usar una cuenta en
+// particular solo porque nuestro formulario pedía un correo específico; si
+// el navegador ya tenía otra cuenta de Google activa, pudo terminar
+// conectando ESA sin que nadie lo notara. Ver callback.js para el uso.
+export async function emailDeCuentaConectada(connectedAccountId){
+  try{
+    const j = await ejecutarAccionGmail({ action:'GMAIL_GET_PROFILE', params:{}, connectedAccountId })
+    const data = j.data || j
+    return data?.emailAddress || data?.email || null
+  }catch(e){ console.warn('[composio] GMAIL_GET_PROFILE falló:', e.message); return null }
+}
+
 // Ejecuta una acción del toolkit gmail para la cuenta conectada de una
 // persona específica — v3.1 (v2 está deprecado 410).
 // Requiere entity_id = email del usuario que conectó su Gmail.
