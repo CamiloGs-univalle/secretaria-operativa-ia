@@ -10,7 +10,14 @@ const FRECUENCIAS = [
 
 function formatHora(d){ return d.toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'}) }
 
-export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo=null, onAction, showToast }){
+export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo=null, onAction, showToast, session=null, cargando=false }){
+  // Antes la Mascota llamaba "Señor" a cualquier persona que abriera sesión
+  // — una app pensada para cualquier cuenta de Google no puede asumir ni el
+  // género ni el trato de quien la usa. Ahora usa el nombre real de la
+  // sesión (o un saludo neutro si aún no lo conoce) en vez de un honorífico
+  // fijo repetido en cada mensaje.
+  const primerNombre = (session?.nombre || session?.email || '').split(' ')[0].split('@')[0] || ''
+  const saludoNombre = primerNombre || 'Hola'
   const [frecuencia,setFrecuencia]=useState(()=> localStorage.getItem('soia_mascota_freq')||'3h')
   const [abierto,setAbierto]=useState(()=>{
     const v=localStorage.getItem('soia_mascota_abierto')
@@ -47,18 +54,26 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
     try{ window.mascotaAPI?.sendStats?.(estado.stats) }catch{}
   },[estado.stats])
 
-  // Bienvenida solo si vacío — concisa
+  // Bienvenida solo si vacío — concisa.
+  // Antes esto corría con deps [] (una sola vez, apenas monta el componente)
+  // usando el `estado` de ESE primer render — pero procesos/análisis todavía
+  // podían estar vacíos en ese instante (llegan un tick después, incluso en
+  // demo). Resultado real observado: la Mascota saludaba "🟢 Todo al día"
+  // mientras el badge de arriba ya mostraba "Vencido" — se contradecía a sí
+  // misma frente al cliente. Ahora espera a que `cargando` (loading de
+  // App.jsx) sea false antes de saludar, para usar el estado real.
   useEffect(()=>{
+    if(cargando) return
     if(mensajes.length===0){
       const saludo = estado.id==='EMERGENCIA'
-        ? `🔴 ¡Señor, ${estado.stats?.venc||0} vencido(s) — empecemos por el primero!`
+        ? `🔴 ¡${saludoNombre}, ${estado.stats?.venc||0} vencido(s) — empecemos por el primero!`
         : estado.id==='IMPORTANTE'
-        ? `🟠 Señor, ${estado.stats?.alta||0} pendiente(s) importante(s).`
-        : `🟢 ¡Hola Señor! Todo al día.`
+        ? `🟠 ${saludoNombre}, ${estado.stats?.alta||0} pendiente(s) importante(s).`
+        : `🟢 ¡Hola${primerNombre?' '+primerNombre:''}! Todo al día.`
       setMensajes(m=>[...m, { id: Date.now(), de:'mascota', texto: saludo, hora: formatHora(new Date()), estado: estado.id }])
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  },[])
+  },[cargando])
 
   // Recordatorio periódico — conciso y ágil, no llena de tablas
   useEffect(()=>{
@@ -70,7 +85,7 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
       const key=`soia_mascota_notif_${now.toISOString().slice(0,10)}_${h}`
       if(localStorage.getItem(key)) return
       localStorage.setItem(key,'1')
-      const texto = generarRecordatorio(h, { procesos })
+      const texto = generarRecordatorio(h, { procesos, nombre: primerNombre })
       const notif = { id: Date.now(), de:'mascota', texto, hora: formatHora(now), tipo:'recordatorio', estado: estado.id }
       setMensajes(m=>[...m, notif])
       setHasNew(true)
@@ -96,7 +111,7 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
   useEffect(()=>{
     const handler = (e,data)=>{
       if(data?.hour) {
-        const texto = generarRecordatorio(data.hour, { procesos: procesosRef.current })
+        const texto = generarRecordatorio(data.hour, { procesos: procesosRef.current, nombre: primerNombre })
         setMensajes(m=>[...m, { id: Date.now(), de:'mascota', texto, hora: formatHora(new Date()), tipo:'recordatorio' }])
         setHasNew(true)
       }
@@ -124,9 +139,9 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
       const fallback = top3[0] || procesos[0]
       if(fallback){
         contexto.proceso = fallback
-        pushMensaje('mascota', `Entendido Señor — tomaré "${fallback.titulo.slice(0,45)}" como referencia.`)
+        pushMensaje('mascota', `Entendido — tomaré "${fallback.titulo.slice(0,45)}" como referencia.`)
       } else {
-        pushMensaje('mascota', `Señor, seleccione un proceso en la web y vuelva a decirme “${raw}”.`)
+        pushMensaje('mascota', `Seleccione un proceso en la web y vuelva a decirme "${raw}".`)
         return
       }
     } else if(!contexto.proceso && !contexto.correo){
@@ -153,7 +168,7 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
     try{
       switch(interp.intent){
         case 'COMPLETAR': {
-          if(!proc){ msg='Seleccione un proceso Señor.'; break }
+          if(!proc){ msg='Seleccione un proceso.'; break }
           onAction?.({ type:'COMPLETAR', proceso: proc, interpretacion: interp })
           audit('mascota_completar', { proceso: proc.id, accion:'POSIBLE_FINALIZACION' })
           msg = `🟢 Marcado "${proc.titulo.slice(0,40)}" como listo. ¿Lo cierro?`
@@ -163,48 +178,49 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
         case 'CERRAR_CONFIRMADO': {
           onAction?.({ type:'CERRAR', proceso: proc })
           audit('mascota_cerrar', { proceso: proc.id, accion:'CERRADO' })
-          msg = `✅ Cerrado ${proc.id} Señor.`
+          msg = `✅ Cerrado ${proc.id}.`
           break
         }
         case 'REENVIAR': {
-          if(!proc && !correo){ msg='Seleccione un correo Señor.'; break }
+          if(!proc && !correo){ msg='Seleccione un correo.'; break }
           onAction?.({ type:'REENVIAR', proceso: proc, correo, destinatario: interp.destinatario, interpretacion: interp })
           audit('mascota_reenvio_preparado', { proceso: proc?.id, correo: correo?.id, destinatario: interp.destinatario })
           msg = `📨 Borrador a ${interp.destinatario} listo — confirme envío.`
           break
         }
         case 'REPROGRAMAR': {
-          if(!proc){ msg='Seleccione un proceso Señor.'; break }
+          if(!proc){ msg='Seleccione un proceso.'; break }
           onAction?.({ type:'REPROGRAMAR', proceso: proc, fecha: interp.fecha })
           audit('mascota_reprogramar', { proceso: proc.id, fecha: interp.fecha.iso })
           msg = `📅 ${proc.id} → ${interp.fecha.label} (${interp.fecha.iso})`
           break
         }
         case 'SEGUIMIENTO': {
-          if(!proc){ msg='Seleccione un proceso Señor.'; break }
+          if(!proc){ msg='Seleccione un proceso.'; break }
           onAction?.({ type:'SEGUIMIENTO', proceso: proc, fecha: interp.fecha })
           audit('mascota_seguimiento', { proceso: proc.id, fecha: interp.fecha.iso })
           msg = `🔔 Seguimiento ${interp.fecha.label}${interp.fecha.iso?` (${interp.fecha.iso})`:''} agendado.`
           break
         }
         case 'URGENTE': {
-          if(!proc){ msg='Seleccione un proceso Señor.'; break }
+          if(!proc){ msg='Seleccione un proceso.'; break }
           onAction?.({ type:'URGENTE', proceso: proc })
           audit('mascota_urgente', { proceso: proc.id })
-          msg = `🔴 ${proc.id} ahora es CRÍTICA Señor.`
+          msg = `🔴 ${proc.id} ahora es CRÍTICA.`
           break
         }
         default:
           msg = interp.explicacion
       }
     }catch(e){
-      msg = `Disculpe Señor: ${e.message}`
+      msg = `Disculpe, ocurrió un error: ${e.message}`
     }
     if(msg){ pushMensaje('mascota', msg); showToast?.(msg) }
   }
 
   const dotColor = estado.id==='EMERGENCIA' ? '#dc2626' : estado.id==='IMPORTANTE' ? '#d97706' : estado.id==='INFO' ? '#eab308' : '#059669'
-  const resumenCorto = estado.id==='EMERGENCIA' ? `${estado.stats?.venc||0} vencidas` : estado.id==='IMPORTANTE' ? `${estado.stats?.alta||0} altas` : `al día`
+  const nVenc = estado.stats?.venc||0, nAlta = estado.stats?.alta||0
+  const resumenCorto = estado.id==='EMERGENCIA' ? `${nVenc} vencida${nVenc===1?'':'s'}` : estado.id==='IMPORTANTE' ? `${nAlta} alta${nAlta===1?'':'s'}` : `al día`
   const showBadge = hasNew && !abierto
 
   return (
@@ -249,7 +265,7 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
                   <span style={{fontSize:10,color:'var(--muted)'}}>{p.prioridad==='CRITICA'?'🔴':p.prioridad==='ALTA'?'🟠':'🟡'} {p.prioridad} • vence {p.fechaLimite} {p.retraso?`• +${p.retraso}d`:''}</span>
                 </span>
               </button>
-            )) : <div style={{fontSize:12,color:'var(--muted)'}}>Sin pendientes Señor — ¡al día!</div>}
+            )) : <div style={{fontSize:12,color:'var(--muted)'}}>Sin pendientes — ¡al día!</div>}
           </div>
 
           {/* Log conciso — solo últimos 3 */}
@@ -260,7 +276,7 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
                 <span style={{fontSize:11,lineHeight:1.4,whiteSpace:'pre-wrap'}}>{m.texto}</span>
               </div>
             ))}
-            {mensajes.length===0 && <div style={{fontSize:11,color:'var(--muted)',textAlign:'center'}}>Hola Señor — ¿en qué le ayudo?</div>}
+            {mensajes.length===0 && <div style={{fontSize:11,color:'var(--muted)',textAlign:'center'}}>Hola{primerNombre?' '+primerNombre:''} — ¿en qué le ayudo?</div>}
           </div>
 
           {/* Chips ágiles — 5 en 2 filas compactas */}
@@ -275,7 +291,7 @@ export default function Mascota({ procesos=[], analisis=[], sel=null, viewCorreo
               <div style={{fontSize:11,fontWeight:700}}>⚠️ Confirmar: {confirmando.interpretacion.descripcion} {confirmando.interpretacion.destinatario?`→ ${confirmando.interpretacion.destinatario}`:''}</div>
               <div style={{display:'flex',gap:6,marginTop:6}}>
                 <button className="btn primary sm" onClick={()=>{ const c={...confirmando}; setConfirmando(null); ejecutarAccion(c.interpretacion,c.contexto) }}>Confirmar</button>
-                <button className="btn sm" onClick={()=>{ pushMensaje('mascota','Cancelado Señor.'); setConfirmando(null)}}>Cancelar</button>
+                <button className="btn sm" onClick={()=>{ pushMensaje('mascota','Cancelado.'); setConfirmando(null)}}>Cancelar</button>
               </div>
             </div>
           )}

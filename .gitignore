@@ -11,3 +11,7 @@ electron/dist-packager
 electron/dist-installer
 electron/node_modules
 .env*
+
+# PII - nunca versionar snapshot real de Gmail
+src/data/gmailReal.json
+

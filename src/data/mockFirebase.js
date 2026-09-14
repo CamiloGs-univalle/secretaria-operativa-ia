@@ -1,5 +1,8 @@
 // Firebase mock + Firestore real — fuente de verdad híbrida
-// - Si hay usuario Firebase autenticado (cualquier Google) → Firestore es la verdad, compartida entre todos los correos.
+// - Si hay usuario Firebase autenticado (cualquier Google) → Firestore es la verdad, pero
+//   filtrada por `propietario` (el correo de quien inició sesión) — la colección física es
+//   la misma para todas las cuentas, pero cada quien solo lee/escribe sus propios documentos
+//   (ver fetchProcesosFirestore/subscribeProcesosFirestore más abajo y firestore.rules).
 // - Si no hay sesión Firebase (demo/offline) → localStorage como antes.
 // - Namespace demo/real separado para que demo no mezcle con real en mismo navegador.
 //
@@ -16,7 +19,7 @@
 // que `limpiarDatosDeEjemploFirestore()` sepa qué IDs borrar si alguien los
 // alcanzó a sembrar en Firestore antes de este arreglo.
 import { db, auth } from '../lib/firebase.js'
-import { collection, doc, deleteDoc, setDoc, getDocs, onSnapshot, query, orderBy, addDoc } from 'firebase/firestore'
+import { collection, doc, deleteDoc, setDoc, getDocs, onSnapshot, query, where, orderBy, addDoc } from 'firebase/firestore'
 
 let NS = ''
 export function setModoAlmacenamiento(esDemo){ NS = esDemo ? '_demo' : '' }
@@ -89,11 +92,22 @@ export function saveProcesos(list){ try{ localStorage.setItem(keyProcesos(), JSO
 export function getProcesos(){ return loadProcesos() }
 export function getProceso(id){ return loadProcesos().find(p=>p.id===id) }
 
-// Firestore helpers — compartido entre todos los correos logueados con Google
-export async function fetchProcesosFirestore(){
-  if(!isFirebaseMode()) return null
+// Firestore helpers.
+//
+// Antes esto leía TODA la colección `procesos` sin ningún filtro — cualquier
+// persona que entrara con Google veía, mezclados en una sola lista, los
+// procesos generados desde el correo de TODAS las demás personas. Con 4
+// personas usando la app, cada una viendo sus tareas mezcladas con las de
+// las otras 3, sin poder distinguir de quién era cada una — exactamente el
+// reporte de "está uniendo todo". Ahora cada proceso se guarda con
+// `propietario` (el correo de quien lo generó — ver processGenerator.js) y
+// esta consulta solo trae los del correo indicado: cada persona ve solo sus
+// propios procesos, nunca los de otra.
+export async function fetchProcesosFirestore(miEmail){
+  if(!isFirebaseMode() || !miEmail) return null
   try{
-    const snap = await getDocs(collection(db, 'procesos'))
+    const q = query(collection(db, 'procesos'), where('propietario','==', miEmail))
+    const snap = await getDocs(q)
     // Antes: si la colección estaba vacía, se sembraban los 6 procesos de
     // ejemplo directo en Firestore compartido — la primera persona en entrar
     // con Google convertía esos datos ficticios en "los datos del equipo"
@@ -125,13 +139,18 @@ export async function limpiarDatosDeEjemploFirestore(){
   return { ok:true, borrados }
 }
 
-export function subscribeProcesosFirestore(cb){
-  if(!isFirebaseMode()) return ()=>{}
+// Igual que fetchProcesosFirestore: antes suscribía a TODA la colección
+// (todos los procesos de todas las personas mezclados). Ahora filtra por
+// `propietario` para que cada quien solo reciba actualizaciones en tiempo
+// real de sus propios procesos.
+export function subscribeProcesosFirestore(cb, miEmail){
+  if(!isFirebaseMode() || !miEmail) return ()=>{}
   try{
-    const q = query(collection(db, 'procesos'), orderBy('ultimaActividad','desc'))
+    const q = query(collection(db, 'procesos'), where('propietario','==', miEmail), orderBy('ultimaActividad','desc'))
     return onSnapshot(q, (snap)=>{
       const list = snap.docs.map(d=> d.data())
-      if(list.length) { saveProcesos(list); cb(list) }
+      saveProcesos(list)
+      cb(list)
     }, (err)=> console.warn('[Firestore] subscribe', err.message))
   }catch(e){ console.warn(e); return ()=>{} }
 }
@@ -161,8 +180,20 @@ export function addProceso(p){
 export function resetMock(){ localStorage.removeItem(keyProcesos()); return [] }
 
 // auditoria — dual: local + Firestore
+//
+// Antes, cuando no había sesión Firebase (modo demostración, o alguien que
+// solo conectó Gmail por Composio sin pasar por Google), el registro de
+// auditoría siempre decía "Coordinadora" — un nombre fijo, sin importar
+// quién de verdad estuviera usando la app en ese momento. Eso es justo lo
+// que se reportó como "dato quemado": dos personas distintas en modo demo
+// verían exactamente el mismo nombre en su historial. `setUsuarioActual`
+// deja que App.jsx le diga a este módulo quién es la persona real de la
+// sesión actual (nombre o correo), para que auditoría refleje a quien
+// corresponda incluso sin Firebase.
+let _usuarioActual = null
+export function setUsuarioActual(u){ _usuarioActual = u || null }
 export function audit(action, extra={}){
-  const entry = { fecha:new Date().toISOString(), usuario: auth.currentUser?.email || 'Coordinadora', accion:action, ...extra }
+  const entry = { fecha:new Date().toISOString(), usuario: auth.currentUser?.email || _usuarioActual || 'Invitado', accion:action, ...extra }
   try{
     const logs=JSON.parse(localStorage.getItem(keyAudit())||'[]')
     logs.unshift(entry)

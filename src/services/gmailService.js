@@ -50,3 +50,23 @@ export async function syncGmail(){
 export const GMAIL_META = {
   note: 'Gmail real vía /api/gmail/live — requiere sesión conectada. Cada persona ve su propia cuenta.'
 }
+
+// Antes "Archivar" y "Marcar leído" en la pantalla SOLO cambiaban el estado
+// local de React — el mensaje seguía intacto (con INBOX/UNREAD) en la
+// bandeja real de Gmail de la persona. El endpoint /api/gmail/archive ya
+// existía en el backend pero nunca se llamaba desde aquí. Estas dos
+// funciones lo conectan: cuando hay Gmail real conectado, la acción se
+// refleja también en la bandeja real; si falla o no hay conexión (modo
+// demo), no se lanza — el estado local ya cambió, que es lo único que hay
+// en modo demostración.
+export async function archivarGmailReal(id){
+  const r = await fetch('/api/gmail/archive', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }), credentials:'same-origin' })
+  if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.error || `HTTP ${r.status}`) }
+  return true
+}
+
+export async function marcarLeidoGmailReal(id){
+  const r = await fetch('/api/gmail/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }), credentials:'same-origin' })
+  if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.error || `HTTP ${r.status}`) }
+  return true
+}

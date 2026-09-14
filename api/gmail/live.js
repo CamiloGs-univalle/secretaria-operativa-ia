@@ -1,12 +1,18 @@
 // GET /api/gmail/live?max=30&q=
-// Live Gmail fetch — usa Gmail API con OAuth (backend, nunca frontend)
-// En local/despliegue sin OAuth, hace fallback al snapshot real
+// Live Gmail fetch — usa Composio (cuenta conectada por cada persona) o,
+// si algún día se configura, Gmail API directa con OAuth propio del
+// despliegue (backend, nunca frontend).
 //
-// `assert { type: 'json' }` es la sintaxis vieja de import assertions — en
-// Node 22 (el runtime de este despliegue) lanza SyntaxError y esta función
-// nunca llegaba a ejecutarse. `with { type: 'json' }` es la sintaxis
-// estable actual (import attributes).
-import gmailReal from '../../src/data/gmailReal.json' with { type: 'json' }
+// Antes había un tercer camino: si la sesión ERA
+// auxiliar.ti@proservis.com.co pero SIN cuenta Gmail conectada, se servía un
+// snapshot JSON congelado (una foto fija del inbox tomada una sola vez).
+// Ese snapshot nunca se actualiza — con el paso de los días se vuelve cada
+// vez más viejo y es exactamente el reporte de "datos quemados": alguien
+// entra, no ha conectado su Gmail todavía, y ve una bandeja que parece real
+// pero es una foto de hace días. Se quitó por completo: sin cuenta
+// conectada, la única respuesta honesta es pedir que conecte su Gmail — el
+// frontend ya sabe mostrar esa pantalla (ver App.jsx, session.firebase &&
+// !gmailConectado).
 import { getSession } from '../_lib/session.js'
 import { ejecutarAccionGmail } from '../_lib/composio.js'
 
@@ -85,15 +91,8 @@ export default async function handler(req, res){
     // return res.json({ messages: normalize(messages), source:'gmail-api-live' })
   }
 
-  // Sin cuenta conectada y sin Gmail API directa configurada: nunca se debe
-  // devolver el snapshot fijo de auxiliar.ti@proservis.com.co a alguien que
-  // no sea esa cuenta. El único caso legítimo para servir ese snapshot es
-  // cuando session.email ES esa cuenta (uso interno de Proservis mientras no
-  // haya credenciales reales configuradas todavía).
-  if(session.email === 'auxiliar.ti@proservis.com.co'){
-    let msgs = gmailReal
-    if(q) msgs = msgs.filter(m=> (m.asunto+m.cuerpo+m.remitente).toLowerCase().includes(q))
-    return res.json({ messages: msgs.slice(0,max), source:'snapshot-real-gmail', account:'auxiliar.ti@proservis.com.co', snapshot:'2026-09-11T21:35:57Z', total: gmailReal.length })
-  }
-  return res.status(404).json({ error:'sin_gmail_conectado', messages: [], note:'Esta sesión no tiene una cuenta de Gmail conectada.' })
+  // Sin cuenta conectada y sin Gmail API directa configurada: la única
+  // respuesta honesta es decir que falta conectar Gmail — nunca datos
+  // envejecidos disfrazados de "reales".
+  return res.status(404).json({ error:'sin_gmail_conectado', messages: [], note:'Esta sesión no tiene una cuenta de Gmail conectada. Use "Conectar mi Gmail real" en la pantalla de inicio.' })
 }

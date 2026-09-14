@@ -60,7 +60,38 @@ de campo exactos que espera tu cuenta/plan. Si algo no calza, ajusta
 `api/_lib/composio.js` — ahí está todo centralizado, no hace falta tocar
 las rutas ni el frontend.
 
-## 5. Nada se rompe si esto no está listo
+## 5. "No puedo responder los correos" — revisa el alcance (scope) del Auth Config
+
+Si conectar Gmail funciona pero **enviar o responder falla**, la causa más
+probable no está en el código sino en el Auth Config de Gmail creado en el
+paso 2a: por defecto Composio/Google a veces solo piden permiso de
+**lectura** (`gmail.readonly` / `gmail.metadata`), no de **envío**
+(`gmail.send`) ni de **modificar** (`gmail.modify`, necesario para
+archivar/etiquetar).
+
+Cómo revisarlo:
+1. Entra al dashboard de Composio → **Toolkits → Gmail → tu Auth Config**.
+2. Mira la lista de *scopes* (alcances) que pide. Deben incluir, como
+   mínimo: `https://www.googleapis.com/auth/gmail.send` (enviar/responder)
+   y, si quieres que "marcar como listo" también actualice el Gmail real,
+   `https://www.googleapis.com/auth/gmail.modify`.
+3. Si falta alguno, **edita el Auth Config para agregarlo** (o crea uno
+   nuevo con los scopes correctos) y pide a cada persona que ya conectó su
+   cuenta que **vuelva a conectar** — un cambio de scopes no aplica
+   retroactivamente a conexiones ya hechas con el permiso viejo.
+4. Verifica también, en Google Cloud Console → APIs & Services → OAuth
+   consent screen, que la app esté en modo **Producción** (no "Testing" con
+   una lista cerrada de usuarios de prueba) o que la persona esté agregada
+   como *test user* — si no, Google puede bloquear el consentimiento sin
+   avisar con un mensaje claro.
+
+Con el cambio de este mismo commit, si el envío falla por esto **ya se verá
+en la pantalla** (un mensaje de error fijo dentro del modal de respuesta, en
+vez de un aviso que desaparecía solo) — el texto exacto que devuelva
+Composio/Google ahí es la pista definitiva de cuál de los pasos anteriores
+falta.
+
+## 6. Nada se rompe si esto no está listo
 Cada punto de integración (`live.js`, `send.js`, `archive.js`) intenta
 primero la conexión real de la persona (si existe), y si falla por
 cualquier razón, **sigue exactamente con el comportamiento de siempre**
