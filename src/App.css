@@ -133,6 +133,7 @@
 .dashboard-compact{width:100%;max-width:100%;display:flex;flex-direction:column;gap:16px;overflow:visible}
 .dashboard-compact-inner{display:flex;flex-direction:column;gap:16px}
 .dashboard-extra-scroll{display:flex;flex-direction:column;gap:16px;overflow:visible}
+.dashboard-detail{display:flex;flex-direction:column;gap:16px;margin-top:4px}
 .section-label{font-size:11px;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;color:var(--accent);margin-bottom:10px;display:flex;align-items:center;gap:10px;font-family:'Plus Jakarta Sans','Inter',sans-serif}
 .section-label::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--border),transparent)}
 
