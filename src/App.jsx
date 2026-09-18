@@ -789,7 +789,7 @@ export default function App(){
     seguimientos.sort((x,y)=> new Date(x.correo.fecha) - new Date(y.correo.fecha))
     return { atenderAhora, requiereRespuesta, seguimientos, sinAccion }
   },[analisis])
-  const [verMas,setVerMas]=useState(false) // "Ver más" — plan del día, indicadores, detalle técnico (oculto por defecto)
+  const [verMas,setVerMas]=useState(true) // visible por defecto para que no quede recortado
 
   // --- Contactos y Seguimientos como pestañas de primera clase (sección
   // 20/23 del documento) — se derivan de los mismos procesos/correos reales,
