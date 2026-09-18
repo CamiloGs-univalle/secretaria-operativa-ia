@@ -1413,6 +1413,64 @@ export default function App(){
                 <button className="btn primary sm" onClick={()=>{setTab('inbox'); setInboxFiltro(f=>({...f,tab:'ACCION'}))}}>Ver pendientes →</button>
               </div>
 
+              {/* FOCO TANGIBLE — lo que DEBES hacer ahora, sin jerga, súper visible */}
+              {(()=>{
+                const activos = procesos.filter(p=>!['COMPLETADO','CERRADO','CANCELADO'].includes(p.estado))
+                if(!activos.length) return null
+                const orden={CRITICA:4,ALTA:3,MEDIA:2,BAJA:1,INFORMATIVA:0}
+                const foco = [...activos].filter(p=> p.turnoActual==='COORDINADORA' || fechaVencidaCalendario(p) || p.prioridad==='CRITICA').sort((a,b)=>{
+                  const va=fechaVencidaCalendario(a)?1:0, vb=fechaVencidaCalendario(b)?1:0
+                  if(va!==vb) return vb-va
+                  if(orden[b.prioridad]!==orden[a.prioridad]) return orden[b.prioridad]-orden[a.prioridad]
+                  return new Date(a.fechaLimite)-new Date(b.fechaLimite)
+                }).slice(0,4)
+                // si no hay nada que te toque, muestra las 4 más próximas igual para que no quede vacío
+                const lista = foco.length? foco : [...activos].sort((a,b)=> new Date(a.fechaLimite)-new Date(b.fechaLimite)).slice(0,3)
+                const vencidas = activos.filter(fechaVencidaCalendario).length
+                const teToca = activos.filter(p=>p.turnoActual==='COORDINADORA').length
+                return (
+                  <div className="focus-hero">
+                    <div className="focus-hero-head">
+                      <div className="focus-title"><span className="focus-title-icon">🎯</span> LO QUE DEBES HACER AHORA</div>
+                      <span className="focus-badge">{lista.length} {lista.length===1?'tarea prioritaria':'tareas prioritarias'}</span>
+                    </div>
+                    <div className="focus-sub">
+                      {vencidas>0 ? `🔴 Tienes ${vencidas} vencida${vencidas===1?'':'s'} — esto es lo primero.` : teToca>0 ? `Tienes ${teToca} que esperan TU respuesta — empieza por estas.` : `Estas son las 3 más próximas a vencer.`}
+                      <span style={{fontWeight:400, color:'var(--muted)', marginLeft:6}}>Toca <b style={{color:'#991b1b'}}>Hacer</b> para actuar en 1 clic.</span>
+                    </div>
+                    <div className="focus-list" style={{marginTop:12}}>
+                      {lista.map(p=>{
+                        const v = estadoVisualProceso(p)
+                        const cls = p.prioridad==='CRITICA'?'critica':p.prioridad==='ALTA'?'alta':'media'
+                        const vencido = fechaVencidaCalendario(p)
+                        const diasVenc = vencido ? diasEntre(p.fechaLimite) : null
+                        const porVencer = porVencerPronto(p.fechaLimite, vencido, false)
+                        let why='', whyCls=cls
+                        if(vencido){ why=`🔴 VENCIDO hace ${diasVenc}d — debes resolver HOY`; whyCls='critica' }
+                        else if(porVencer){ const d=-diasEntre(p.fechaLimite); why=`🟡 Vence ${d===0?'HOY':`en ${d}d`} — adelántate`; whyCls=d===0?'critica':'alta' }
+                        else if(p.prioridad==='CRITICA'){ why='🔴 CRÍTICA — atiende ahora'; whyCls='critica' }
+                        else if(p.turnoActual==='COORDINADORA'){ why='🟠 Te toca responder — esperando tu acción'; whyCls='alta' }
+                        else { why=`🔵 Esperando a ${p.responsable||'otra persona'}`; whyCls='media' }
+                        return (
+                          <div key={p.id} className={`focus-item ${cls}`}>
+                            <div className="focus-item-main">
+                              <div className="focus-item-title">{p.titulo}</div>
+                              <div className={`focus-item-why ${whyCls}`}>{why} <span style={{fontWeight:600, color:'var(--muted)', fontSize:11}}>• {explicarEtapa(p.etapa)}</span></div>
+                              <div className="focus-item-meta"><span>📅 Vence <b>{p.fechaLimite}</b></span><span>• {p.area} • {p.id}</span><span style={{display:'flex',alignItems:'center',gap:4}}><PrioridadDot n={p.prioridad}/> {p.prioridad}</span></div>
+                            </div>
+                            <div className="focus-item-action">
+                              <button className="btn sm primary" onClick={()=>{setSel(p); setTab('procesos')}}>Hacer →</button>
+                              <button className="btn sm" onClick={()=>{const c=correos.find(x=>p.correos?.includes(x.id)); if(c) verCorreo(c); else {setSel(p); setTab('procesos')}}}>Ver</button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                    {!lista.length && <div className="focus-empty"><b>✨ Todo al día</b>No tienes nada urgente que requiera tu acción ahora.</div>}
+                  </div>
+                )
+              })()}
+
               {/* Bandeja inteligente — el mismo componente de fila que usa la
                   pestaña dedicada (sin duplicar la vista), con sus pestañas de
                   filtro y "Ordenar por". */}
@@ -1626,10 +1684,21 @@ export default function App(){
                 <table className="table tareas-table">
                   <thead><tr><th>Tarea</th><th>Estado</th><th>Etapa</th><th>Vence</th><th>Retraso</th><th></th></tr></thead>
                   <tbody>
-                    {tareasPaginados.map(p=>(
+                    {tareasPaginados.map(p=>{
+                      const v=fechaVencidaCalendario(p); const pv=porVencerPronto(p.fechaLimite, v, ['COMPLETADO','CERRADO','CANCELADO'].includes(p.estado)); const isYourTurn=p.turnoActual==='COORDINADORA'
+                      return (
                       <tr key={p.id} className={sel?.id===p.id?'sel':''} onClick={()=>setSel(p)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setSel(p) } }} tabIndex={0} aria-selected={sel?.id===p.id} style={{cursor:'pointer'}}>
-                        <td><div style={{display:'flex',alignItems:'center',gap:6}}><PrioridadDot n={p.prioridad}/><div style={{fontWeight:700,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:300}}>{p.titulo}</div></div><div className="mono" style={{fontSize:11,color:'var(--muted)'}}>{p.id} • {p.area} • {p.categoria}</div>
-                        <div className="estado-mobile"><EstadoBadge v={estadoVisualProceso(p)}/></div></td>
+                        <td>
+                          <div style={{display:'flex',alignItems:'center',gap:6}}><PrioridadDot n={p.prioridad}/><div style={{fontWeight:800,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:300}}>{p.titulo}</div></div>
+                          <div className="mono" style={{fontSize:11,color:'var(--muted)'}}>{p.id} • {p.area} • {p.categoria}</div>
+                          {v ? <div style={{fontSize:11,fontWeight:800,color:'#dc2626',marginTop:3}}>🔴 Vencido hace {diasEntre(p.fechaLimite)}d — hazlo hoy</div>
+                            : pv ? (()=>{const d=-diasEntre(p.fechaLimite); return <div style={{fontSize:11,fontWeight:800,color:'#d97706',marginTop:3}}>🟡 Vence {d===0?'HOY':`en ${d}d`} — adelántate</div>})()
+                            : p.prioridad==='CRITICA' ? <div style={{fontSize:11,fontWeight:800,color:'#dc2626',marginTop:3}}>🔴 Crítica — te toca actuar ahora</div>
+                            : isYourTurn ? <div style={{fontSize:11,fontWeight:700,color:'#b45309',marginTop:3}}>🟠 Te toca responder</div>
+                            : <div style={{fontSize:11,fontWeight:600,color:'var(--muted)',marginTop:3}}>🔵 Esperando a {p.responsable||'otra persona'}</div>
+                          }
+                          <div className="estado-mobile" style={{marginTop:4}}><EstadoBadge v={estadoVisualProceso(p)}/></div>
+                        </td>
                         <td><EstadoBadge v={estadoVisualProceso(p)}/></td>
                         <td style={{fontSize:12}}>{explicarEtapa(p.etapa)}</td>
                         <td style={{fontSize:12}}>{p.fechaLimite}</td>
@@ -1641,7 +1710,8 @@ export default function App(){
                           <button className="btn sm" onClick={(e)=>{e.stopPropagation(); setSel(p)}}>Detalle</button>
                         </td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
                 {!filtrados.length && <div className="empty-state">Sin resultados con esos filtros.</div>}

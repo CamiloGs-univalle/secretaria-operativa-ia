@@ -391,6 +391,39 @@
 .asistente-recuerda-banner{display:flex;gap:12px;align-items:center;background:linear-gradient(135deg,rgba(24,135,95,0.08),rgba(6,182,214,0.06));border:1px solid var(--accent-border);border-radius:16px;padding:14px 18px;font-size:13px;font-weight:600;color:var(--text2);box-shadow:var(--shadow)}
 .asistente-recuerda-icon{font-size:18px;flex-shrink:0}
 
+/* ===== FOCO TANGIBLE — lo que DEBES hacer ahora (máximo contraste) ===== */
+.focus-hero{background:linear-gradient(135deg,#fff 0%,#fef2f2 100%);border:1px solid #fecaca;border-radius:16px;padding:18px 18px 14px;box-shadow:0 4px 16px rgba(220,38,38,0.07), 0 1px 3px rgba(0,0,0,0.06);margin-bottom:2px}
+[data-theme="dark"] .focus-hero{background:linear-gradient(135deg,rgba(220,38,38,0.10),rgba(0,0,0,0));border-color:rgba(248,113,113,0.25)}
+.focus-hero-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #fee2e2}
+[data-theme="dark"] .focus-hero-head{border-color:rgba(248,113,113,0.15)}
+.focus-title{font-size:15px;font-weight:900;letter-spacing:-0.2px;display:flex;align-items:center;gap:8px;font-family:'Plus Jakarta Sans','Inter',sans-serif;color:#991b1b}
+[data-theme="dark"] .focus-title{color:#fca5a5}
+.focus-title-icon{width:28px;height:28px;border-radius:8px;background:#dc2626;color:#fff;display:grid;place-items:center;font-size:14px;box-shadow:0 2px 8px rgba(220,38,38,0.25)}
+.focus-badge{padding:5px 12px;border-radius:999px;background:#dc2626;color:#fff;font-size:11px;font-weight:800;letter-spacing:0.2px;box-shadow:0 2px 6px rgba(220,38,38,0.2)}
+.focus-sub{font-size:12px;color:#7f1d1d;font-weight:600;line-height:1.4}
+[data-theme="dark"] .focus-sub{color:#fecaca}
+.focus-list{display:flex;flex-direction:column;gap:10px}
+.focus-item{display:flex;gap:12px;align-items:center;padding:14px 14px;background:#fff;border:1px solid #e8eaed;border-left:4px solid #dc2626;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.05);transition:.15s cubic-bezier(.2,0,0,1)}
+.focus-item:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,0.08);border-color:#fecaca}
+[data-theme="dark"] .focus-item{background:var(--card);border-color:rgba(148,163,184,0.12)}
+.focus-item.critica{border-left-color:#dc2626;background:linear-gradient(90deg,#fef2f2 0%,#fff 100%)}
+.focus-item.alta{border-left-color:#f59e0b;background:linear-gradient(90deg,#fffbeb 0%,#fff 100%)}
+.focus-item.media{border-left-color:#18875f;background:linear-gradient(90deg,#f0fdf4 0%,#fff 100%)}
+[data-theme="dark"] .focus-item.critica{background:linear-gradient(90deg,rgba(220,38,38,0.08),transparent)}
+[data-theme="dark"] .focus-item.alta{background:linear-gradient(90deg,rgba(245,158,11,0.08),transparent)}
+.focus-item-main{flex:1;min-width:0}
+.focus-item-title{font-weight:800;font-size:13.5px;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text)}
+.focus-item-why{font-size:11.5px;font-weight:800;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.focus-item-why.critica{color:#dc2626}
+.focus-item-why.alta{color:#d97706}
+.focus-item-why.media{color:#059669}
+.focus-item-meta{font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.focus-item-meta b{color:var(--text);font-weight:700}
+.focus-item-action{flex-shrink:0;display:flex;gap:6px}
+.focus-empty{padding:22px;text-align:center;background:#f0fdf4;border:1px dashed #a7f3d0;border-radius:12px;color:#065f46}
+[data-theme="dark"] .focus-empty{background:rgba(16,185,129,0.08);border-color:rgba(16,185,129,0.2);color:#a7f3d0}
+.focus-empty b{display:block;font-size:14px;margin-bottom:4px}
+
 /* 4 tarjetas KPI mockup proporción correcta */
 .kpi-mockup-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px;margin-bottom:16px}
 .kpi-mockup-card{text-align:left;background:var(--card);border:1px solid var(--border);border-radius:16px;padding:18px 18px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden;transition:.25s cubic-bezier(.16,1,.3,1);cursor:pointer;display:flex;flex-direction:column;gap:10px}
