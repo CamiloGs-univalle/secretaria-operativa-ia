@@ -564,6 +564,8 @@ export default function App(){
   const [calFecha,setCalFecha]=useState(()=> new Date()) // mes visible en el calendario estilo Google
   const [delegarTarget,setDelegarTarget]=useState(null) // tarea a delegar
   const [delegarEmail,setDelegarEmail]=useState('')
+  const [viewCorreoNota,setViewCorreoNota]=useState('') // nota rápida desde el visor
+  const [viewCorreoFecha,setViewCorreoFecha]=useState(()=> fechaLocalISO(new Date(Date.now()+86400000))) // mañana por defecto
 
   // Al salir del Inbox (o al llegar más correos), limpiar la selección — evita
   // que un id seleccionado en un filtro quede "fantasma" al cambiar de vista.
@@ -1158,7 +1160,7 @@ export default function App(){
   function verCorreo(correo){
     const a = analisis.find(x=> x.correo.id===correo.id)?.a || analizarCorreoCompleto(correo, null, session?.email)
     const proc = procesos.find(p=> p.correos?.includes(correo.id) || p.hiloId===correo.hiloId) || null
-    setViewCorreo({ correo, a, proc })
+    setViewCorreo({ correo, a, proc }); setViewCorreoNota(''); setViewCorreoFecha(fechaLocalISO(new Date(Date.now()+86400000)))
   }
   // --- Fila de correo estilo mockup — un solo componente usado tanto en el
   // resumen "Bandeja inteligente" de Inicio como en la pestaña dedicada, así
@@ -2320,11 +2322,67 @@ export default function App(){
                   {viewCorreo.proc && <Pill color="blue">🗂️ Tarea {viewCorreo.proc.id}</Pill>}
                 </div>
               </div>
+
+              {/* Seguimiento en vivo — desde el visor puedes hacer TODO sin ir a otra pestaña */}
+              <div style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:14}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8,marginBottom:10}}>
+                  <b style={{fontSize:12,display:'flex',alignItems:'center',gap:6}}><Clock size={13}/> Seguimiento en vivo</b>
+                  {viewCorreo.proc && <span style={{fontSize:11,color:'var(--muted)'}} className="mono">{viewCorreo.proc.id} • {viewCorreo.proc.estado} • vence {viewCorreo.proc.fechaLimite}</span>}
+                  {!viewCorreo.proc && <Pill color="gray">Sin tarea aún — créala aquí</Pill>}
+                </div>
+
+                {viewCorreo.proc ? (
+                  <>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10}}>
+                      <button className="btn sm primary" onClick={()=>{ marcarProcesoListo(viewCorreo.proc.id); setViewCorreo(vc=> vc?{...vc, proc:{...vc.proc, estado:'COMPLETADO'}}:vc); showToast('✅ Marcado como hecho') }}><Check size={13}/> Ya se hizo</button>
+                      <button className={`btn sm ${viewCorreo.proc.destacado?'primary':''}`} onClick={()=>{ toggleResaltar(viewCorreo.proc.id); setViewCorreo(vc=> vc?{...vc, proc:{...vc.proc, destacado:!vc.proc.destacado}}:vc) }}><Star size={13} fill={viewCorreo.proc.destacado?"currentColor":"none"}/> {viewCorreo.proc.destacado?'Quitar resaltado':'Resaltar'}</button>
+                      <button className="btn sm" onClick={()=>{ setDelegarTarget(viewCorreo.proc); }}><UserPlus size={13}/> Delegar</button>
+                      <button className="btn sm" onClick={()=>{ const d=new Date(viewCorreo.proc.fechaLimite); d.setDate(d.getDate()+1); updateProceso(viewCorreo.proc.id,{fechaLimite:fechaLocalISO(d)}); agregarHistorial(viewCorreo.proc.id,{icon:'⏰',texto:`Pospuesto a ${fechaLocalISO(d)} desde visor`}); refresh(); setViewCorreo(vc=> vc?{...vc, proc:{...vc.proc, fechaLimite:fechaLocalISO(d)}}:vc); showToast('⏰ Pospuesto 1 día') }}>⏰ Mañana</button>
+                      <button className="btn sm ghost" onClick={()=>{ marcarCerrado(viewCorreo.proc.id); setViewCorreo(null) }}><X size={13}/> Cerrar</button>
+                    </div>
+
+                    <div style={{display:'flex',gap:8,alignItems:'flex-end'}}>
+                      <div style={{flex:1}}>
+                        <label style={{fontSize:11,fontWeight:700,color:'var(--muted)',display:'block',marginBottom:4}}>📝 Nota para hacerlo después</label>
+                        <input className="input" value={viewCorreoNota} onChange={e=>setViewCorreoNota(e.target.value)} placeholder="Ej: Llamar mañana, falta adjunto, revisar con TI..." />
+                      </div>
+                      <input className="input" type="date" value={viewCorreoFecha} onChange={e=>setViewCorreoFecha(e.target.value)} style={{width:150}} />
+                      <button className="btn sm primary" disabled={!viewCorreoNota.trim()} onClick={()=>{
+                        const nota=viewCorreoNota.trim()
+                        updateProceso(viewCorreo.proc.id,{ seguimientos:[...(viewCorreo.proc.seguimientos||[]), {fecha:viewCorreoFecha, nota}], ultimaActividad:new Date().toISOString() })
+                        agregarHistorial(viewCorreo.proc.id,{icon:'📝', texto:`Nota: ${nota.slice(0,60)} → ${viewCorreoFecha}`})
+                        refresh()
+                        setViewCorreoNota(''); showToast(`📝 Nota guardada para ${viewCorreoFecha}`)
+                      }}>Guardar</button>
+                    </div>
+                    {viewCorreo.proc.historial?.slice(-3).length>0 && (
+                      <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:4}}>
+                        <span style={{fontSize:10,fontWeight:800,letterSpacing:0.5,textTransform:'uppercase',color:'var(--muted)'}}>Último seguimiento</span>
+                        {viewCorreo.proc.historial.slice(-3).reverse().map((h,i)=>(<div key={i} style={{fontSize:11,background:'var(--card)',border:'1px solid var(--border)',borderRadius:8,padding:'6px 8px',display:'flex',gap:6}}><span>{h.icon}</span><span style={{flex:1}}>{h.texto}</span><span className="mono" style={{color:'var(--muted)'}}>{h.fecha}</span></div>))}
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <div style={{fontSize:12,color:'var(--muted)',marginBottom:8}}>Este correo aún no generó tarea. Créala para que el sistema te haga seguimiento.</div>
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      <button className="btn sm primary" onClick={()=>{
+                        const nuevo={ id:`PROC-${Date.now().toString().slice(-5)}`, titulo:viewCorreo.correo.asunto.slice(0,60), descripcion:viewCorreo.correo.cuerpo.slice(0,120), area:'General', categoria:'Solicitud', prioridad: viewCorreo.a.prioridad.nivel||'MEDIA', estado:'PENDIENTE', etapa:'NUEVA_SOLICITUD', fechaLimite:viewCorreoFecha, tiempoObjetivo:3, tiempoTranscurrido:0, tiempoRestante:3, retraso:0, responsable:session?.nombre||session?.email||'—', turnoActual:'COORDINADORA', esperanRespuesta:true, proximaAccion:'Responder', correos:[viewCorreo.correo.id], hiloId:viewCorreo.correo.hiloId, seguimientos:[{fecha:viewCorreoFecha, nota: viewCorreoNota||'Creado desde visor'}], historial:[{fecha:fechaLocalISO(), icon:'➕', texto:'Tarea creada desde el visor del correo'}], destacado:false, ultimaActividad:new Date().toISOString() }
+                        saveProcesos([...getProcesos(), nuevo]); setProcesos(getProcesos()); if(session?.firebase) saveProcesoFirestore(nuevo); showToast('➕ Tarea creada y en seguimiento'); setViewCorreo(null)
+                      }}><Pin size={13}/> Crear tarea y hacer seguimiento</button>
+                      <div style={{display:'flex',gap:6,alignItems:'center',flex:1}}>
+                        <input className="input" value={viewCorreoNota} onChange={e=>setViewCorreoNota(e.target.value)} placeholder="Nota inicial (opcional)" style={{flex:1}}/>
+                        <input className="input" type="date" value={viewCorreoFecha} onChange={e=>setViewCorreoFecha(e.target.value)} style={{width:140}}/>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
             <div className="reply-actions">
-              <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{viewCorreo.correo.etiquetas?.includes('UNREAD')?'● No leído':'Leído'}</span>
+              <span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{viewCorreo.correo.etiquetas?.includes('UNREAD')?'● No leído':'Leído'} {viewCorreo.proc?`• ${viewCorreo.proc.id}`:''}</span>
               <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                {viewCorreo.proc && <button className="btn ghost" onClick={()=>{ setSel(viewCorreo.proc); setTab('procesos'); setViewCorreo(null) }}>Ver tarea</button>}
+                {viewCorreo.proc && <button className="btn ghost" onClick={()=>{ setSel(viewCorreo.proc); setTab('procesos'); setViewCorreo(null) }}>Ver tarea completa</button>}
                 <button className="btn" onClick={()=>{ marcarLeido(viewCorreo.correo.id); setViewCorreo(null) }}>Marcar leído</button>
                 <button className="btn ghost" onClick={()=>{ archivarCorreo(viewCorreo.correo.id); setViewCorreo(null) }}>Archivar</button>
                 <button className="btn primary" onClick={()=>{ const c=viewCorreo.correo; setViewCorreo(null); abrirResponder(c) }}>Responder con IA →</button>
