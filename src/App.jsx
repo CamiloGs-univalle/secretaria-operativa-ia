@@ -1389,7 +1389,8 @@ export default function App(){
 
         <main className="main">
           {tab==='dashboard' && (
-            <>
+            <div className="dashboard-compact">
+              <div className="dashboard-compact-inner">
               <div className="live-banner">
                 {gmailConectado ? (
                   <span className="mono live-label">🔴 DATOS REALES — {session.email} • {correos.length} correos analizados • Inbox ordenado por prioridad</span>
@@ -1551,10 +1552,11 @@ export default function App(){
 
               <button className="btn ghost sm" style={{margin:'4px 0 18px'}} onClick={()=>setVerMas(v=>!v)}>{verMas?'▲ Ocultar detalle y números':'▼ Ver más detalle (plan por horas, indicadores, vista previa)'}</button>
 
-              {verMas && (
-                <>
-                  <div className="section-label">Resumen numérico</div>
-                  <div className="kpis">
+                {verMas && (
+                  <div className="dashboard-extra-scroll">
+                  <>
+                    <div className="section-label">Resumen numérico</div>
+                    <div className="kpis">
                     {[
                       {label:'Críticas',value:stats.crit,color:'#dc2626',sub:'Atender ahora • hoy',trend:'↑'},
                       {label:'Altas',value:stats.alta,color:'#d97706',sub:'Durante el día',trend:'→'},
@@ -1632,12 +1634,14 @@ export default function App(){
                       <div><b>Incidencias</b><div className="mono">{metricas.incActivas} activa{metricas.incActivas===1?'':'s'} de {metricas.total} procesos</div></div>
                     </div>
                   </div>
-                </>
-              )}
-            </>
-          )}
+                  </>
+                  </div>
+                )}
+              </div>
+              </div>
+            )}
 
-          {tab==='inbox' && (
+            {tab==='inbox' && (
             <>
               <div className="card">
                 <div className="card-head"><h3>Bandeja inteligente</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>{correos.length} correos reales • ordenados por prioridad, no por llegada</span></div>
