@@ -15,10 +15,10 @@ export default async function handler(req, res){
   try{
     const { id } = req.body || {}
     if(!id){ res.status(400).json({ error:'missing_id' }); return }
-    await ejecutarAccionGmail({ action:'GMAIL_REMOVE_LABEL', params:{ message_id:id, label_ids:['UNREAD'] }, connectedAccountId: session.connectedAccountId, entityId: session.email })
+    await ejecutarAccionGmail({ action:'GMAIL_ADD_LABEL_TO_EMAIL', params:{ message_id:id, remove_label_ids:['UNREAD'] }, connectedAccountId: session.connectedAccountId, entityId: session.email })
     res.status(200).json({ ok:true })
   }catch(e){
     console.error('[gmail/read]', e.message)
-    res.status(500).json({ error:'read_failed' })
+    res.status(500).json({ error:'read_failed', detalle: e.message })
   }
 }
