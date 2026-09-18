@@ -1416,7 +1416,7 @@ export default function App(){
               {/* Bandeja inteligente — el mismo componente de fila que usa la
                   pestaña dedicada (sin duplicar la vista), con sus pestañas de
                   filtro y "Ordenar por". */}
-              <div className="card">
+              <div className="card bandeja-card-compact">
                 <div className="card-head"><h3>Bandeja inteligente</h3>
                   <select className="input" style={{width:'auto'}} value={ordenBandeja} onChange={e=>setOrdenBandeja(e.target.value)}>
                     <option value="URGENCIA">Ordenar por: Urgencia</option>
@@ -1434,7 +1434,7 @@ export default function App(){
                     <button key={t.k} className={`bandeja-tab ${inboxFiltro.tab===t.k?'active':''}`} onClick={()=>{ if(t.k==='TAREAS'){ setTab('procesos'); return } if(t.k==='SEGUIMIENTOS'){ setTab('seguimientos'); return } setInboxFiltro(f=>({...f,tab:t.k}))}}>{t.l} <span className="n">{t.n}</span></button>
                   ))}
                 </div>
-                <div>
+                <div className="bandeja-scroll">
                   {[...inboxFiltrado].sort((a,b)=> ordenBandeja==='RECIENTE' ? new Date(b.correo.fecha)-new Date(a.correo.fecha) : (b.a.prioridad.score-a.a.prioridad.score)).slice(0,8).map(({correo,a})=>renderMailRow(correo,a))}
                   {!inboxFiltrado.length && <div className="empty-state">Sin correos en este filtro.</div>}
                 </div>
@@ -1579,7 +1579,7 @@ export default function App(){
                       {seleccionados.size>0 && <button className="btn sm ghost" onClick={()=>setSeleccionados(new Set())}>Deseleccionar</button>}
                       <span className="mono" style={{fontSize:11,color:'var(--muted)',alignSelf:'center',marginLeft:8}}>💡 Marca la casilla para acciones masivas, o haz clic en el correo para leerlo completo.</span>
                     </div>
-                    <div>
+                    <div className="bandeja-scroll" style={{maxHeight:'520px'}}>
                       {inboxFiltrado.map(({correo,a})=>(
                         <div key={correo.id} style={{display:'flex',alignItems:'flex-start',gap:8}}>
                           <input type="checkbox" style={{marginTop:18}} checked={seleccionados.has(correo.id)} onChange={()=>toggleSeleccion(correo.id)}/>
