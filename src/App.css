@@ -402,24 +402,24 @@
 .asistente-recuerda-banner{display:flex;gap:12px;align-items:center;background:linear-gradient(135deg,rgba(24,135,95,0.08),rgba(6,182,214,0.06));border:1px solid var(--accent-border);border-radius:16px;padding:14px 18px;font-size:13px;font-weight:600;color:var(--text2);box-shadow:var(--shadow)}
 .asistente-recuerda-icon{font-size:18px;flex-shrink:0}
 
-/* ===== FOCO TANGIBLE — lo que DEBES hacer ahora (máximo contraste) ===== */
-.focus-hero{background:linear-gradient(135deg,#fff 0%,#fef2f2 100%);border:1px solid #fecaca;border-radius:16px;padding:18px 18px 14px;box-shadow:0 4px 16px rgba(220,38,38,0.07), 0 1px 3px rgba(0,0,0,0.06);margin-bottom:2px}
-[data-theme="dark"] .focus-hero{background:linear-gradient(135deg,rgba(220,38,38,0.10),rgba(0,0,0,0));border-color:rgba(248,113,113,0.25)}
-.focus-hero-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #fee2e2}
-[data-theme="dark"] .focus-hero-head{border-color:rgba(248,113,113,0.15)}
-.focus-title{font-size:15px;font-weight:900;letter-spacing:-0.2px;display:flex;align-items:center;gap:8px;font-family:'Plus Jakarta Sans','Inter',sans-serif;color:#991b1b}
-[data-theme="dark"] .focus-title{color:#fca5a5}
-.focus-title-icon{width:28px;height:28px;border-radius:8px;background:#dc2626;color:#fff;display:grid;place-items:center;font-size:14px;box-shadow:0 2px 8px rgba(220,38,38,0.25)}
-.focus-badge{padding:5px 12px;border-radius:999px;background:#dc2626;color:#fff;font-size:11px;font-weight:800;letter-spacing:0.2px;box-shadow:0 2px 6px rgba(220,38,38,0.2)}
-.focus-sub{font-size:12px;color:#7f1d1d;font-weight:600;line-height:1.4}
-[data-theme="dark"] .focus-sub{color:#fecaca}
+/* ===== FOCO TANGIBLE — integrado al diseño (no rompe) ===== */
+.focus-hero{background:rgba(255,255,255,0.88);backdrop-filter:blur(16px) saturate(1.1);border:1px solid #e8eaed;border-radius:16px;padding:18px 18px 14px;box-shadow:0 1px 2px rgba(60,64,67,0.06), 0 2px 8px rgba(60,64,67,0.04);margin-bottom:2px}
+[data-theme="dark"] .focus-hero{background:var(--card);border-color:rgba(148,163,184,0.15)}
+.focus-hero-head{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f1f3f4}
+[data-theme="dark"] .focus-hero-head{border-color:rgba(148,163,184,0.12)}
+.focus-title{font-size:14px;font-weight:800;letter-spacing:-0.2px;display:flex;align-items:center;gap:8px;font-family:'Plus Jakarta Sans','Inter',sans-serif;color:var(--text)}
+.focus-title-icon{width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#dc2626,#b91c1c);color:#fff;display:grid;place-items:center;font-size:13px;box-shadow:0 2px 6px rgba(220,38,38,0.15)}
+.focus-badge{padding:5px 12px;border-radius:999px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-size:11px;font-weight:800;letter-spacing:0.1px}
+[data-theme="dark"] .focus-badge{background:rgba(220,38,38,0.12);border-color:rgba(248,113,113,0.2);color:#fca5a5}
+.focus-sub{font-size:12px;color:var(--muted);font-weight:600;line-height:1.4}
+.focus-sub b{color:var(--text)}
 .focus-list{display:flex;flex-direction:column;gap:10px}
-.focus-item{display:flex;gap:12px;align-items:center;padding:14px 14px;background:#fff;border:1px solid #e8eaed;border-left:4px solid #dc2626;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,0.05);transition:.15s cubic-bezier(.2,0,0,1)}
-.focus-item:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,0.08);border-color:#fecaca}
+.focus-item{display:flex;gap:12px;align-items:center;padding:13px 14px;background:#fff;border:1px solid #e8eaed;border-left:3px solid #dc2626;border-radius:12px;box-shadow:0 1px 2px rgba(60,64,67,0.06);transition:.15s cubic-bezier(.2,0,0,1)}
+.focus-item:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(60,64,67,0.08);border-color:#e8eaed}
 [data-theme="dark"] .focus-item{background:var(--card);border-color:rgba(148,163,184,0.12)}
-.focus-item.critica{border-left-color:#dc2626;background:linear-gradient(90deg,#fef2f2 0%,#fff 100%)}
-.focus-item.alta{border-left-color:#f59e0b;background:linear-gradient(90deg,#fffbeb 0%,#fff 100%)}
-.focus-item.media{border-left-color:#18875f;background:linear-gradient(90deg,#f0fdf4 0%,#fff 100%)}
+.focus-item.critica{border-left-color:#dc2626}
+.focus-item.alta{border-left-color:#f59e0b}
+.focus-item.media{border-left-color:#18875f}
 [data-theme="dark"] .focus-item.critica{background:linear-gradient(90deg,rgba(220,38,38,0.08),transparent)}
 [data-theme="dark"] .focus-item.alta{background:linear-gradient(90deg,rgba(245,158,11,0.08),transparent)}
 .focus-item-main{flex:1;min-width:0}
