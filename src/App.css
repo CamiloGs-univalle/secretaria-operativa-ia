@@ -248,6 +248,11 @@
   .tareas-pages{order:-1;width:100%;justify-content:center}
 }
 .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:rgba(255,255,255,0.80);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:var(--shadow)}
+/* Módulos con scroll interno — límite profesional para listas largas */
+.module-scroll{max-height:520px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--border2) transparent}
+.module-scroll::-webkit-scrollbar{width:6px}
+.module-scroll::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:999px}
+[data-theme="dark"] .module-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12)}
 .filters input,.filters select{background:var(--card);border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:10px;font-size:13px;flex:1;min-width:160px;font-weight:600;transition:.2s}
 .filters input:focus,.filters select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-light)}
 .detail-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:18px}
