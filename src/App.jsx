@@ -524,6 +524,8 @@ export default function App(){
   const [correos,setCorreos]=useState([])
   const [loading,setLoading]=useState(true)
   const [filtro,setFiltro]=useState({q:'', prior:'TODAS', estado:'TODOS', area:'TODAS'})
+  const [tareasPage,setTareasPage]=useState(1)
+  const [tareasPageSize,setTareasPageSize]=useState(10)
   const [inboxFiltro,setInboxFiltro]=useState({q:'', tab:'TODOS'}) // TODOS, ACCION, URGENTES, INCIDENCIAS, NO_RELEVANTE
   const [sel,setSel]=useState(null)
   const [tab,setTab]=useState('dashboard')
@@ -727,6 +729,12 @@ export default function App(){
     if(filtro.q && !(p.titulo+p.id+p.area).toLowerCase().includes(filtro.q.toLowerCase())) return false
     return true
   }),[procesos,filtro])
+  // paginación tareas — evita lista infinita tosca
+  // al cambiar filtros vuelve a pág 1 automáticamente
+  useEffect(()=>{ setTareasPage(1) },[filtro])
+  const tareasTotalPages = Math.max(1, Math.ceil(filtrados.length / tareasPageSize))
+  const tareasPaginados = useMemo(()=> filtrados.slice((tareasPage-1)*tareasPageSize, tareasPage*tareasPageSize),[filtrados, tareasPage, tareasPageSize])
+  useEffect(()=>{ if(tareasPage>tareasTotalPages) setTareasPage(tareasTotalPages) },[tareasTotalPages, tareasPage])
 
   const inboxFiltrado=useMemo(()=>{
     let list=[...analisis]
@@ -1598,17 +1606,29 @@ export default function App(){
                 <button className="btn sm" onClick={()=>exportarCSV(filtrados)}>⬇️ Descargar en Excel</button>
                 <button className="btn sm ghost" onClick={sincronizarSheetsReal} disabled={sheetsSyncing}>{sheetsSyncing?'Enviando…':'↗ Google Sheets'}</button>
               </div>
-              <div className="table-wrap card" style={{padding:0}}>
-                <table className="table">
+              <div className="tareas-card">
+                <div className="tareas-card-head">
+                  <div className="tareas-count">
+                    <b>{filtrados.length}</b> tarea{filtrados.length===1?'':'s'} {filtro.q || filtro.prior!=='TODAS' || filtro.estado!=='TODOS' || filtro.area!=='TODAS' ? 'filtradas' : 'en total'}
+                    <span className="mono" style={{fontWeight:400,color:'var(--muted)'}}> • mostrando {(tareasPage-1)*tareasPageSize+1}-{Math.min(tareasPage*tareasPageSize, filtrados.length)} • pág {tareasPage}/{tareasTotalPages}</span>
+                  </div>
+                  <div className="tareas-head-actions">
+                    <label className="tareas-perpage">Filas:
+                      <select value={tareasPageSize} onChange={e=>{setTareasPageSize(Number(e.target.value)); setTareasPage(1)}}>
+                        <option value={10}>10</option>
+                        <option value={25}>25</option>
+                        <option value={50}>50</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+                <div className="table-wrap" style={{padding:0, borderBottom:0, borderRadius:'12px 12px 0 0'}}>
+                <table className="table tareas-table">
                   <thead><tr><th>Tarea</th><th>Estado</th><th>Etapa</th><th>Vence</th><th>Retraso</th><th></th></tr></thead>
                   <tbody>
-                    {filtrados.map(p=>(
+                    {tareasPaginados.map(p=>(
                       <tr key={p.id} className={sel?.id===p.id?'sel':''} onClick={()=>setSel(p)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setSel(p) } }} tabIndex={0} aria-selected={sel?.id===p.id} style={{cursor:'pointer'}}>
                         <td><div style={{display:'flex',alignItems:'center',gap:6}}><PrioridadDot n={p.prioridad}/><div style={{fontWeight:700,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:300}}>{p.titulo}</div></div><div className="mono" style={{fontSize:11,color:'var(--muted)'}}>{p.id} • {p.area} • {p.categoria}</div>
-                        {/* En celular la tabla se desplaza horizontalmente y la columna Estado
-                            queda fuera de vista al abrir — se repite el badge aquí, debajo del
-                            título, solo en mobile (ver .estado-mobile en App.css), para que se
-                            entienda por color de un vistazo sin tener que deslizar. */}
                         <div className="estado-mobile"><EstadoBadge v={estadoVisualProceso(p)}/></div></td>
                         <td><EstadoBadge v={estadoVisualProceso(p)}/></td>
                         <td style={{fontSize:12}}>{explicarEtapa(p.etapa)}</td>
@@ -1625,6 +1645,18 @@ export default function App(){
                   </tbody>
                 </table>
                 {!filtrados.length && <div className="empty-state">Sin resultados con esos filtros.</div>}
+                {!tareasPaginados.length && !!filtrados.length && <div className="empty-state">Sin resultados en esta página — vuelva a la primera.</div>}
+                </div>
+                <div className="tareas-pagination">
+                  <button className="tareas-page-btn" disabled={tareasPage<=1} onClick={()=> setTareasPage(p=> Math.max(1,p-1))}><ChevronLeft size={16}/> Anterior</button>
+                  <div className="tareas-pages">
+                    {Array.from({length: tareasTotalPages},(_,i)=> i+1).slice(Math.max(0, tareasPage-3), Math.max(0, tareasPage-3)+5).map(n=>(
+                      <button key={n} className={`tareas-page-num ${n===tareasPage?'active':''}`} onClick={()=> setTareasPage(n)}>{n}</button>
+                    ))}
+                    {tareasTotalPages>5 && tareasPage < tareasTotalPages-2 && <span className="tareas-ellipsis">… {tareasTotalPages}</span>}
+                  </div>
+                  <button className="tareas-page-btn" disabled={tareasPage>=tareasTotalPages} onClick={()=> setTareasPage(p=> Math.min(tareasTotalPages,p+1))}>Siguiente <ChevronRight size={16}/></button>
+                </div>
               </div>
               {sel && (
                 <div className="detail-grid">
