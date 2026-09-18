@@ -61,12 +61,12 @@ export const GMAIL_META = {
 // en modo demostración.
 export async function archivarGmailReal(id){
   const r = await fetch('/api/gmail/archive', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }), credentials:'same-origin' })
-  if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.error || `HTTP ${r.status}`) }
+  if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.detalle || j.error || `HTTP ${r.status}`) }
   return true
 }
 
 export async function marcarLeidoGmailReal(id){
   const r = await fetch('/api/gmail/read', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }), credentials:'same-origin' })
-  if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.error || `HTTP ${r.status}`) }
+  if(!r.ok){ const j = await r.json().catch(()=>({})); throw new Error(j.detalle || j.error || `HTTP ${r.status}`) }
   return true
 }
