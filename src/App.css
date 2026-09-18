@@ -53,12 +53,12 @@
 .avatar:hover{border-color:var(--accent-border);transform:scale(1.04)}
 [data-theme="dark"] .avatar{background:linear-gradient(135deg,#163D28,#065F46);color:#A7F3D0}
 
-/* LAYOUT — fluido, sin max-width centrado (ocupa todo el ancho disponible) */
-.app{width:100%;max-width:100vw;overflow-x:hidden}
-.layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:0;width:100%;max-width:100%;margin:0;align-items:start;min-height:calc(100vh - 73px)}
+/* LAYOUT — fluido app-like con scroll interno (no página infinita) */
+.app{width:100%;max-width:100vw;overflow-x:hidden;min-height:100vh;display:flex;flex-direction:column}
+.layout{display:grid;grid-template-columns:260px minmax(0,1fr);gap:0;width:100%;max-width:100%;margin:0;align-items:start;height:calc(100vh - 73px);overflow:hidden}
 .layout.con-asistente{grid-template-columns:260px minmax(0,1fr) 340px}
 @media(max-width:1540px){ .layout{grid-template-columns:236px minmax(0,1fr)} .layout.con-asistente{grid-template-columns:236px minmax(0,1fr) 320px} }
-.sidebar{display:flex;flex-direction:column;gap:8px;position:sticky;top:73px;align-self:start;height:calc(100vh - 73px);overflow-y:auto;background:var(--sidebar-bg);padding:20px 16px;border-right:1px solid var(--sidebar-border)}
+.sidebar{display:flex;flex-direction:column;gap:8px;position:sticky;top:0;align-self:start;height:calc(100vh - 73px);overflow-y:auto;background:var(--sidebar-bg);padding:20px 16px;border-right:1px solid var(--sidebar-border);scrollbar-width:thin;scrollbar-color:rgba(255,255,255,0.18) transparent}
 .nav-item{display:flex;gap:12px;align-items:center;padding:12px 14px;border-radius:14px;background:transparent;border:1px solid transparent;text-align:left;transition:.18s cubic-bezier(.16,1,.3,1);position:relative;color:var(--sidebar-text)}
 .nav-item:hover{background:var(--sidebar-hover)}
 .nav-item.active{background:var(--sidebar-active);box-shadow:0 6px 18px rgba(24,135,95,0.24)}
@@ -77,15 +77,15 @@
 .confianza-card::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,0.10),transparent 60%);pointer-events:none}
 .bar{height:8px;background:rgba(255,255,255,0.25);border-radius:999px;overflow:hidden;margin:10px 0;backdrop-filter:blur(4px)}
 .bar>div{height:100%;background:linear-gradient(90deg,#fff,rgba(255,255,255,0.9));border-radius:999px;box-shadow:0 0 10px rgba(255,255,255,0.5)}
-.assistant-col{padding:22px 22px 22px 0;position:sticky;top:73px;align-self:start;height:calc(100vh - 73px);overflow-y:auto;display:flex;flex-direction:column;gap:16px}
+.assistant-col{padding:16px 16px 16px 0;position:sticky;top:0;align-self:start;height:calc(100vh - 73px);overflow-y:auto;display:flex;flex-direction:column;gap:14px;scrollbar-width:thin;scrollbar-color:var(--border2) transparent}
 @media(max-width:1200px){.layout.con-asistente{grid-template-columns:236px minmax(0,1fr)}.assistant-col{display:none}}
 @media(max-width:900px){
-  .layout,.layout.con-asistente{grid-template-columns:1fr}
+  .layout,.layout.con-asistente{grid-template-columns:1fr;height:auto;overflow:visible}
   .sidebar{position:static;height:auto;border-right:0;flex-direction:row;flex-wrap:wrap;overflow:visible;padding:12px 10px;gap:6px}
   .sidebar .nav-item{flex:1 1 auto;justify-content:center;padding:10px 8px}
   .sidebar .nav-item b{font-size:12px}
   .sidebar-card,.sidebar-tagline{display:none}
-  .main{padding:14px 10px 80px}
+  .main{height:auto;overflow:visible;padding:14px 10px 24px}
 }
 
 /* PILLS — vibrantes pero legibles */
@@ -128,7 +128,10 @@
 .clickable-box:hover{border-color:var(--accent-border) !important;background:var(--card-hover) !important;transform:translateY(-1px)}
 .skeleton{display:inline-block;width:36px;height:22px;border-radius:8px;background:linear-gradient(90deg,var(--border) 25%,var(--border2) 37%,var(--border) 63%);background-size:400% 100%;animation:skeleton-pulse 1.4s ease infinite}
 @keyframes skeleton-pulse{0%{background-position:100% 50%}100%{background-position:0 50%}}
-.main{min-width:0;display:flex;flex-direction:column;gap:20px;padding:22px clamp(10px,1.6vw,22px) 80px;width:100%;max-width:100%}
+.main{min-width:0;display:flex;flex-direction:column;gap:18px;padding:18px clamp(10px,1.6vw,18px) 24px;width:100%;max-width:100%;height:100%;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--border2) transparent}
+.main::-webkit-scrollbar{width:6px}
+.main::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:999px}
+[data-theme="dark"] .main::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.15)}
 .section-label{font-size:11px;font-weight:800;letter-spacing:0.8px;text-transform:uppercase;color:var(--accent);margin-bottom:10px;display:flex;align-items:center;gap:10px;font-family:'Plus Jakarta Sans','Inter',sans-serif}
 .section-label::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--border),transparent)}
 
@@ -467,6 +470,13 @@
 .mailrow-menu button:hover{background:var(--accent-light);color:var(--accent)}
 .acciones-rapidas{display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding-top:14px;margin-top:10px;border-top:1px solid var(--border)}
 .acciones-rapidas .btn{flex-shrink:0}
+/* Bandeja inteligente — scroll contenido (no página infinita) */
+.bandeja-scroll{max-height:360px;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:var(--border2) transparent;padding-right:4px;margin-right:-4px}
+.bandeja-scroll::-webkit-scrollbar{width:6px}
+.bandeja-scroll::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:999px}
+[data-theme="dark"] .bandeja-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.12)}
+.bandeja-scroll .empty-state{padding:28px 20px}
+.bandeja-card-compact .card-head{margin-bottom:12px;padding-bottom:10px}
 
 /* ===== GOOGLE CALENDAR — premium (inspirado 100% en Google Calendar) ===== */
 .gcal-wrapper{width:100%;max-width:100%;display:flex;flex-direction:column;gap:14px}
