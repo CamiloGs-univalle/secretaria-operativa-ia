@@ -1550,11 +1550,8 @@ export default function App(){
                 </div>
               </div>
 
-              <button className="btn ghost sm" style={{margin:'4px 0 18px'}} onClick={()=>setVerMas(v=>!v)}>{verMas?'▲ Ocultar detalle y números':'▼ Ver más detalle (plan por horas, indicadores, vista previa)'}</button>
-
-                {verMas && (
-                  <div className="dashboard-extra-scroll">
-                  <>
+              {/* Detalle siempre visible — flujo natural, sin ocultar que parecía roto */}
+              <div className="dashboard-detail">
                     <div className="section-label">Resumen numérico</div>
                     <div className="kpis">
                     {[
@@ -1633,10 +1630,8 @@ export default function App(){
                       <div><b>Cumplimiento</b><div className="mono">{metricas.pctATiempo}% a tiempo • {100-metricas.pctATiempo}% con retraso</div></div>
                       <div><b>Incidencias</b><div className="mono">{metricas.incActivas} activa{metricas.incActivas===1?'':'s'} de {metricas.total} procesos</div></div>
                     </div>
+                    </div>
                   </div>
-                  </>
-                  </div>
-                )}
               </div>
               </div>
             )}
