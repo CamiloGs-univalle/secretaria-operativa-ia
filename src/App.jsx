@@ -791,7 +791,7 @@ export default function App(){
     seguimientos.sort((x,y)=> new Date(x.correo.fecha) - new Date(y.correo.fecha))
     return { atenderAhora, requiereRespuesta, seguimientos, sinAccion }
   },[analisis])
-  const [verMas,setVerMas]=useState(true) // visible por defecto para que no quede recortado
+  const [inicioTab,setInicioTab]=useState('resumen') // resumen | plan | inbox | indicadores - pestañas del detalle compacto
 
   // --- Contactos y Seguimientos como pestañas de primera clase (sección
   // 20/23 del documento) — se derivan de los mismos procesos/correos reales,
@@ -1549,9 +1549,16 @@ export default function App(){
                 </div>
               </div>
 
-              {/* Detalle siempre visible — flujo natural, sin ocultar que parecía roto */}
-              <div className="dashboard-detail">
-                    <div className="section-label">Resumen numérico</div>
+              {/* Dashboard completo con pestañas — compacto y profesional, no largo asqueroso */}
+              <div className="inicio-detail-card">
+                <div className="inicio-tabs">
+                  <button className={`inicio-tab ${inicioTab==='resumen'?'active':''}`} onClick={()=>setInicioTab('resumen')}><span className="kdot" style={{background:'#dc2626'}}/> Resumen</button>
+                  <button className={`inicio-tab ${inicioTab==='plan'?'active':''}`} onClick={()=>setInicioTab('plan')}>📅 Plan del día</button>
+                  <button className={`inicio-tab ${inicioTab==='inbox'?'active':''}`} onClick={()=>setInicioTab('inbox')}>✉️ Inbox</button>
+                  <button className={`inicio-tab ${inicioTab==='indicadores'?'active':''}`} onClick={()=>setInicioTab('indicadores')}>📊 Indicadores</button>
+                </div>
+                <div className="inicio-tab-panel">
+                  {inicioTab==='resumen' && (
                     <div className="kpis">
                     {[
                       {label:'Críticas',value:stats.crit,color:'#dc2626',sub:'Atender ahora • hoy',trend:'↑'},
@@ -1573,9 +1580,9 @@ export default function App(){
                       </div>
                     )})}
                   </div>
-
-                  <div className="card">
-                    <div className="card-head"><h3>📅 Plan del día — de tus procesos reales</h3><small style={{color:'var(--muted)'}}>Ordenado por prioridad y fecha límite</small></div>
+                  )}
+                  {inicioTab==='plan' && (
+                  <div className="card" style={{margin:0,boxShadow:'none',border:0,padding:0}}>
                     <div className="timeline-plan">
                       {!planDelDia.length && <div className="empty-state">Sin procesos activos todavía — aparecerán en cuanto sincronice su correo.</div>}
                       {planDelDia.map((p,i)=>(
@@ -1587,9 +1594,9 @@ export default function App(){
                       ))}
                     </div>
                   </div>
-
-                  <div className="card">
-                    <div className="card-head"><h3>✉️ Inbox ordenado — vista previa</h3><div style={{display:'flex',gap:8}}><button className="btn sm" onClick={()=>setTab('inbox')}>Abrir inbox completo →</button><button className="btn sm ghost" onClick={handleSync}>Actualizar</button></div></div>
+                  )}
+                  {inicioTab==='inbox' && (
+                  <div className="card" style={{margin:0,boxShadow:'none',border:0,padding:0}}>
                     <div className="table-wrap">
                       <table className="table">
                         <thead><tr><th>Correo (ordenado por prioridad)</th><th>Clasificación</th><th>Turno</th><th>Prioridad</th><th></th></tr></thead>
@@ -1606,11 +1613,11 @@ export default function App(){
                         </tbody>
                       </table>
                     </div>
-                    <div style={{marginTop:10,fontSize:11,color:'var(--muted)'}}>Inbox ordenado: críticas arriba, informativos abajo, auto-archivados grises. Todo filtrable en pestaña Inbox.</div>
+                    <div style={{marginTop:10,display:'flex',gap:8,justifyContent:'flex-end'}}><button className="btn sm" onClick={()=>setTab('inbox')}>Abrir inbox completo →</button><button className="btn sm ghost" onClick={handleSync}>Actualizar</button></div>
                   </div>
-
-                  <div className="card">
-                    <div className="card-head"><h3>📊 Indicadores ejecutivos</h3><span className="mono" style={{fontSize:11,color:'var(--muted)'}}>Calculados de tus procesos reales — no ejemplos</span></div>
+                  )}
+                  {inicioTab==='indicadores' && (
+                  <div className="card" style={{margin:0,boxShadow:'none',border:0,padding:0}}>
                     <div className="charts-row">
                       <div className="chart-box">
                         <Donut pct={metricas.pctCerrados} color="var(--green)" label="Cerrados" sub={`${metricas.cerrados} de ${metricas.total} procesos`} />
@@ -1630,7 +1637,9 @@ export default function App(){
                       <div><b>Incidencias</b><div className="mono">{metricas.incActivas} activa{metricas.incActivas===1?'':'s'} de {metricas.total} procesos</div></div>
                     </div>
                     </div>
-                  </div>
+                  )}
+                </div>
+              </div>
               </div>
             )}
 
