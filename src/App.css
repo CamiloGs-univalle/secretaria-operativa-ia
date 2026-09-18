@@ -216,6 +216,10 @@
 .tareas-perpage select{padding:6px 10px;border-radius:999px;border:1px solid #dadce0;background:#fff;font-size:12px;font-weight:700;color:#3c4043;min-width:auto}
 [data-theme="dark"] .tareas-perpage select{background:var(--card);border-color:rgba(148,163,184,0.2);color:var(--text)}
 .tareas-table thead th{position:sticky;top:0;z-index:2;background:#f8f9fa !important;border-bottom:1px solid #e8eaed}
+.table tr.destacado{background:linear-gradient(90deg,#fffbeb, #fff) !important;border-left:3px solid #f59e0b}
+.table tr.destacado td:first-child{border-left:3px solid #f59e0b}
+.star-btn{padding:6px 8px !important;min-width:32px}
+.star-btn.active{background:#fef3c7 !important;border-color:#fde68a !important;color:#d97706 !important;box-shadow:0 1px 4px rgba(245,158,11,0.25)}
 [data-theme="dark"] .tareas-table thead th{background:rgba(255,255,255,0.04) !important;border-color:rgba(148,163,184,0.12)}
 .tareas-pagination{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;padding:12px 16px;background:#fff;border-top:1px solid #e8eaed}
 [data-theme="dark"] .tareas-pagination{background:var(--card);border-color:rgba(148,163,184,0.12)}
