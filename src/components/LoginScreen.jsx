@@ -1,10 +1,11 @@
 import { useState } from 'react'
+import { Sparkles, BrainCircuit, Inbox, TrendingUp } from 'lucide-react'
 import './LoginScreen.css'
 
 const FEATURES = [
-  { icon: '🧠', t: 'La IA lee cada correo por ti', d: 'Clasifica, prioriza y te dice en palabras simples qué esperan de ti y para cuándo.' },
-  { icon: '📬', t: 'Tu bandeja de verdad se reduce', d: 'Al marcar algo "Listo" desaparece — de la app y, si conectas tu Gmail, también de tu bandeja real.' },
-  { icon: '📈', t: 'Mide si te está ayudando', d: 'Un panel de productividad con datos reales de tu propia cuenta, no ejemplos inventados.' },
+  { icon: BrainCircuit, t: 'La IA lee cada correo por ti', d: 'Clasifica, prioriza y te dice en palabras simples qué esperan de ti y para cuándo.' },
+  { icon: Inbox, t: 'Tu bandeja de verdad se reduce', d: 'Al marcar algo "Listo" desaparece — de la app y, si conectas tu Gmail, también de tu bandeja real.' },
+  { icon: TrendingUp, t: 'Mide si te está ayudando', d: 'Un panel de productividad con datos reales de tu propia cuenta, no ejemplos inventados.' },
 ]
 
 function GoogleIcon(){
@@ -63,13 +64,13 @@ export default function LoginScreen({ onDemoLogin, onRealConnect, onGoogleLogin,
     <div className="login-screen">
       <div className="login-hero">
         <div className="login-hero-inner">
-          <div className="login-logo"><span>SO</span></div>
-          <h1>Secretaria Operativa IA</h1>
-          <p className="login-tag">Tu correo, ordenado por una IA — para cualquier persona, con su propia cuenta.</p>
+          <div className="login-logo"><Sparkles size={26} strokeWidth={2.2}/></div>
+          <h1>Mi Asistente</h1>
+          <p className="login-tag">Tu correo, en buenas manos. Más enfoque, menos correos.</p>
           <div className="login-features">
             {FEATURES.map(f => (
               <div key={f.t} className="login-feature">
-                <div className="login-feature-icon">{f.icon}</div>
+                <div className="login-feature-icon"><f.icon size={18} strokeWidth={2}/></div>
                 <div>
                   <div className="login-feature-t">{f.t}</div>
                   <div className="login-feature-d">{f.d}</div>
