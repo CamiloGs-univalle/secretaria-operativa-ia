@@ -12,7 +12,8 @@ import { getDemoUser, setDemoUser, clearDemoUser, fetchRealSession, logoutReal, 
 import {
   Sparkles, Search, Bell, ChevronDown, ChevronRight, ChevronLeft, Home, Mail, RefreshCw,
   CheckSquare, Calendar, CalendarPlus, Users, Settings, Bot, Leaf, CornerUpLeft,
-  Clock, ListChecks, Reply, Archive, Check, Send,
+  Clock, ListChecks, Reply, Archive, Check, Send, Star, UserPlus, X,
+  Flag, Pin,
 } from 'lucide-react'
 import './App.css'
 
@@ -561,17 +562,19 @@ export default function App(){
   const [busquedaTop,setBusquedaTop]=useState('') // buscador del topbar (mockup) — busca en asunto/remitente/cuerpo
   const [recordatoriosGenerales,setRecordatoriosGenerales]=useState([]) // "recuérdame X" que no calzó con ningún contacto/tarea existente
   const [calFecha,setCalFecha]=useState(()=> new Date()) // mes visible en el calendario estilo Google
+  const [delegarTarget,setDelegarTarget]=useState(null) // tarea a delegar
+  const [delegarEmail,setDelegarEmail]=useState('')
 
   // Al salir del Inbox (o al llegar más correos), limpiar la selección — evita
   // que un id seleccionado en un filtro quede "fantasma" al cambiar de vista.
   useEffect(()=>{ setSeleccionados(new Set()) },[tab])
 
   useEffect(()=>{
-    if(!reply && !viewCorreo) return
-    const onKey=(e)=>{ if(e.key!=='Escape') return; if(reply){ if(!sending) setReply(null) } else if(viewCorreo) setViewCorreo(null) }
+    if(!reply && !viewCorreo && !delegarTarget) return
+    const onKey=(e)=>{ if(e.key!=='Escape') return; if(reply){ if(!sending) setReply(null) } else if(viewCorreo) setViewCorreo(null); else if(delegarTarget) setDelegarTarget(null) }
     window.addEventListener('keydown', onKey)
     return ()=>window.removeEventListener('keydown', onKey)
-  },[reply, sending, viewCorreo])
+  },[reply, sending, viewCorreo, delegarTarget])
 
   // Carga inicial — SOLO cuando ya sabemos si la sesión es demo o real.
   // Antes esto corría con deps [] (una sola vez, sin esperar la sesión) y
@@ -722,13 +725,24 @@ export default function App(){
     }
   },[procesos])
 
-  const filtrados=useMemo(()=>procesos.filter(p=>{
-    if(filtro.prior!=='TODAS'&&p.prioridad!==filtro.prior) return false
-    if(filtro.estado!=='TODOS'&&estadoEfectivo(p)!==filtro.estado) return false
-    if(filtro.area!=='TODAS'&&p.area!==filtro.area) return false
-    if(filtro.q && !(p.titulo+p.id+p.area).toLowerCase().includes(filtro.q.toLowerCase())) return false
-    return true
-  }),[procesos,filtro])
+  const filtrados=useMemo(()=>{
+    const lista=procesos.filter(p=>{
+      if(filtro.prior!=='TODAS'&&p.prioridad!==filtro.prior) return false
+      if(filtro.estado!=='TODOS'&&estadoEfectivo(p)!==filtro.estado) return false
+      if(filtro.area!=='TODAS'&&p.area!==filtro.area) return false
+      if(filtro.q && !(p.titulo+p.id+p.area).toLowerCase().includes(filtro.q.toLowerCase())) return false
+      return true
+    })
+    // destacados siempre arriba para rapidez, luego vencidos, luego prioridad
+    const ord={CRITICA:4,ALTA:3,MEDIA:2,BAJA:1,INFORMATIVA:0}
+    return lista.sort((a,b)=>{
+      if(!!b.destacado !== !!a.destacado) return (b.destacado?1:0)-(a.destacado?1:0)
+      const va=fechaVencidaCalendario(a)?1:0, vb=fechaVencidaCalendario(b)?1:0
+      if(va!==vb) return vb-va
+      if(ord[b.prioridad]!==ord[a.prioridad]) return ord[b.prioridad]-ord[a.prioridad]
+      return new Date(a.fechaLimite)-new Date(b.fechaLimite)
+    })
+  },[procesos,filtro])
   // paginación tareas — evita lista infinita tosca
   // al cambiar filtros vuelve a pág 1 automáticamente
   useEffect(()=>{ setTareasPage(1) },[filtro])
@@ -1050,6 +1064,26 @@ export default function App(){
     refresh()
     if(sel?.id===id) setSel(s=> s?{...s, estado:'COMPLETADO', tareas:tareasListas}:s)
     showToast(`✅ ${id} marcado como listo`)
+  }
+  // Acciones rápidas para pendientes más veloces — cerrar, delegar, resaltar
+  function toggleResaltar(id){
+    const p=procesos.find(x=>x.id===id)
+    const nuevo=!p.destacado
+    updateProceso(id,{ destacado:nuevo, ultimaActividad:new Date().toISOString() })
+    agregarHistorial(id,{icon: nuevo?'⭐':'☆', texto: nuevo?'Resaltado — prioridad visual':'Quitado resaltado'})
+    refresh()
+    if(sel?.id===id) setSel(s=> s?{...s, destacado:nuevo}:s)
+    showToast(nuevo?'⭐ Resaltado — arriba de la lista':'☆ Quitado resaltado')
+  }
+  function delegarTarea(id, nuevoResponsable){
+    if(!nuevoResponsable?.trim()){ showToast('Escribe a quién delegar'); return }
+    updateProceso(id,{ responsable:nuevoResponsable.trim(), turnoActual: nuevoResponsable.trim(), estado:'PENDIENTE', ultimaActividad:new Date().toISOString() })
+    agregarHistorial(id,{icon:'👥', texto:`Delegado a ${nuevoResponsable.trim()}`})
+    audit('delegar_tarea',{proceso:id, delegado:nuevoResponsable.trim()})
+    refresh()
+    if(sel?.id===id) setSel(s=> s?{...s, responsable:nuevoResponsable.trim(), turnoActual:nuevoResponsable.trim()}:s)
+    showToast(`👥 Delegado a ${nuevoResponsable.trim()}`)
+    setDelegarTarget(null); setDelegarEmail('')
   }
   function marcarLeido(id){
     setCorreos(c=>c.map(x=> x.id===id? {...x, etiquetas: x.etiquetas.filter(l=>l!=='UNREAD')}:x))
@@ -1687,7 +1721,7 @@ export default function App(){
                     {tareasPaginados.map(p=>{
                       const v=fechaVencidaCalendario(p); const pv=porVencerPronto(p.fechaLimite, v, ['COMPLETADO','CERRADO','CANCELADO'].includes(p.estado)); const isYourTurn=p.turnoActual==='COORDINADORA'
                       return (
-                      <tr key={p.id} className={sel?.id===p.id?'sel':''} onClick={()=>setSel(p)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setSel(p) } }} tabIndex={0} aria-selected={sel?.id===p.id} style={{cursor:'pointer'}}>
+                      <tr key={p.id} className={`${sel?.id===p.id?'sel':''} ${p.destacado?'destacado':''}`} onClick={()=>setSel(p)} onKeyDown={e=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); setSel(p) } }} tabIndex={0} aria-selected={sel?.id===p.id} style={{cursor:'pointer'}}>
                         <td>
                           <div style={{display:'flex',alignItems:'center',gap:6}}><PrioridadDot n={p.prioridad}/><div style={{fontWeight:800,fontSize:13,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',maxWidth:300}}>{p.titulo}</div></div>
                           <div className="mono" style={{fontSize:11,color:'var(--muted)'}}>{p.id} • {p.area} • {p.categoria}</div>
@@ -1703,11 +1737,16 @@ export default function App(){
                         <td style={{fontSize:12}}>{explicarEtapa(p.etapa)}</td>
                         <td style={{fontSize:12}}>{p.fechaLimite}</td>
                         <td style={{fontSize:12,color:p.retraso>0?undefined:'var(--muted)'}} className={p.retraso>0?'text-danger':''}>{p.retraso?`+${p.retraso}`:'0'}</td>
-                        <td style={{display:'flex',gap:6}}>
+                        <td style={{display:'flex',gap:5,flexWrap:'wrap',alignItems:'center'}}>
+                          <button className={`btn sm star-btn ${p.destacado?'active':''}`} title={p.destacado?"Quitar resaltado":"Resaltar — arriba"} onClick={(e)=>{e.stopPropagation(); toggleResaltar(p.id)}}><Star size={14} fill={p.destacado?"currentColor":"none"} strokeWidth={p.destacado?2.4:2}/></button>
                           {!['COMPLETADO','CERRADO','CANCELADO'].includes(p.estado) && (
-                            <button className="btn sm primary" title="Marcar esta tarea como lista" onClick={(e)=>{e.stopPropagation(); marcarProcesoListo(p.id)}}>✓ Listo</button>
+                            <button className="btn sm primary" title="Marcar como listo (rápido)" onClick={(e)=>{e.stopPropagation(); marcarProcesoListo(p.id)}}><Check size={13}/> Listo</button>
                           )}
-                          <button className="btn sm" onClick={(e)=>{e.stopPropagation(); setSel(p)}}>Detalle</button>
+                          {!['CERRADO','CANCELADO'].includes(p.estado) && (
+                            <button className="btn sm" title="Cerrar tarea (rápido)" onClick={(e)=>{e.stopPropagation(); marcarCerrado(p.id)}}><X size={13}/> Cerrar</button>
+                          )}
+                          <button className="btn sm" title="Delegar a otra persona" onClick={(e)=>{e.stopPropagation(); setDelegarTarget(p); setDelegarEmail(p.responsable||'')}}><UserPlus size={13}/> Delegar</button>
+                          <button className="btn sm ghost" onClick={(e)=>{e.stopPropagation(); setSel(p)}}>Detalle</button>
                         </td>
                       </tr>
                       )
@@ -1760,8 +1799,10 @@ export default function App(){
                       </div>
                     </div>
                     <div style={{marginTop:12,display:'flex',gap:8,flexWrap:'wrap'}}>
-                      <button className="btn primary" onClick={()=>marcarCerrado(sel.id)}>Cerrar tarea</button>
-                      <button className="btn" onClick={()=>{updateProceso(sel.id,{prioridad:'CRITICA'}); refresh(); showToast('Urgente → CRÍTICA')}}>Marcar urgente</button>
+                      <button className="btn primary" onClick={()=>marcarCerrado(sel.id)}><X size={14}/> Cerrar tarea</button>
+                      <button className={`btn ${sel.destacado?'primary':''}`} onClick={()=>toggleResaltar(sel.id)}><Star size={14} fill={sel.destacado?"currentColor":"none"}/> {sel.destacado?'Quitar resaltado':'Resaltar'}</button>
+                      <button className="btn" onClick={()=>{setDelegarTarget(sel); setDelegarEmail(sel.responsable||'')}}><UserPlus size={14}/> Delegar</button>
+                      <button className="btn" onClick={()=>{updateProceso(sel.id,{prioridad:'CRITICA'}); refresh(); showToast('Urgente → CRÍTICA')}}><Flag size={14}/> Marcar urgente</button>
                       <button className="btn ghost" onClick={()=>prepararReenvio(sel)}>Preparar reenvío</button>
                     </div>
                   </div>
@@ -2218,6 +2259,34 @@ export default function App(){
                   {sending?'Enviando…':(confirmSend?'✓ Confirmar y enviar':(reply.modo==='reenviar'?'Reenviar →':'Enviar respuesta →'))}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {delegarTarget && (
+        <div className="reply-overlay" onClick={()=>setDelegarTarget(null)}>
+          <div className="reply-modal" style={{maxWidth:480}} onClick={e=>e.stopPropagation()}>
+            <div className="reply-head">
+              <div>
+                <h3>👥 Delegar tarea</h3>
+                <div className="mono" style={{fontSize:11,color:'var(--muted)',marginTop:2}}>{delegarTarget.id} • {delegarTarget.titulo.slice(0,50)}</div>
+              </div>
+              <button className="btn sm ghost" onClick={()=>setDelegarTarget(null)}>✕</button>
+            </div>
+            <div className="reply-body">
+              <div className="reply-field">
+                <label>¿A quién se la delegas?</label>
+                <input value={delegarEmail} onChange={e=>setDelegarEmail(e.target.value)} placeholder="Nombre o correo — ej: Juan Pérez o juan@empresa.com" autoFocus />
+                <div style={{fontSize:11,color:'var(--muted)',marginTop:6}}>La tarea pasará a <b>{delegarEmail||'otra persona'}</b> y saldrá de tus pendientes inmediatos. Quedará registrada en historial.</div>
+              </div>
+              <div style={{fontSize:12,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,padding:10}}>
+                Actual: <b>{delegarTarget.responsable||'—'}</b> • Vence {delegarTarget.fechaLimite} • {delegarTarget.area}
+              </div>
+            </div>
+            <div className="reply-actions">
+              <button className="btn ghost" onClick={()=>setDelegarTarget(null)}>Cancelar</button>
+              <button className="btn primary" disabled={!delegarEmail.trim()} onClick={()=>delegarTarea(delegarTarget.id, delegarEmail)}><UserPlus size={14}/> Delegar →</button>
             </div>
           </div>
         </div>
