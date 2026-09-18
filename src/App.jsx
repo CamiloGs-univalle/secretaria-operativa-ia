@@ -1019,16 +1019,19 @@ export default function App(){
   // remoto falla (red, permisos) no se revierte el cambio local: ya quedó
   // marcado aquí, y se avisa para que la persona sepa que no alcanzó a
   // reflejarse afuera.
-  function sincronizarCorreosDeTareaConGmail(ids){
+  function sincronizarCorreosDeTareaConGmail(ids, motivo='Tarea completada'){
     if(!ids.length) return
-    // Vista local: el correo sale de la Bandeja porque su tarea ya se dio
-    // por terminada aquí — esto pasa siempre, haya o no Gmail conectado.
-    moverAArchivados(ids, 'Tarea completada')
+    // Bandeja con menos cosas: el correo sale de la Bandeja porque su tarea ya se hizo
+    // — se archiva local y en Gmail real (se quita etiqueta INBOX y se clasifica).
+    moverAArchivados(ids, motivo)
     setCorreos(c=>c.filter(x=>!ids.includes(x.id)))
+    if(ids.length) showToast(`🗄️ ${ids.length} correo(s) archivado(s) — bandeja más limpia`)
     if(!gmailConectado) return
     Promise.allSettled(ids.map(id=>archivarGmailReal(id))).then(rs=>{
       const fallidos = rs.filter(r=>r.status==='rejected').length
-      if(fallidos) showToast(`⚠️ ${fallidos} de ${ids.length} correo(s) no se archivaron en Gmail real`)
+      const ok = rs.filter(r=>r.status==='fulfilled').length
+      if(fallidos) showToast(`⚠️ ${fallidos} de ${ids.length} no se archivaron en Gmail real`)
+      else if(ok) showToast(`📨 ${ok} correo(s) movido(s) en Gmail real — clasificado como completado`)
     })
   }
   function agregarHistorial(id, entrada){
@@ -1079,12 +1082,16 @@ export default function App(){
   }
   function delegarTarea(id, nuevoResponsable){
     if(!nuevoResponsable?.trim()){ showToast('Escribe a quién delegar'); return }
+    const p=procesos.find(x=>x.id===id)
+    const idsCorreo=correosDeTarea(p).map(c=>c.id)
     updateProceso(id,{ responsable:nuevoResponsable.trim(), turnoActual: nuevoResponsable.trim(), estado:'PENDIENTE', ultimaActividad:new Date().toISOString() })
-    agregarHistorial(id,{icon:'👥', texto:`Delegado a ${nuevoResponsable.trim()}`})
+    agregarHistorial(id,{icon:'👥', texto:`Delegado a ${nuevoResponsable.trim()} — archivado de tu bandeja`})
     audit('delegar_tarea',{proceso:id, delegado:nuevoResponsable.trim()})
+    // Bandeja con menos cosas: al delegar, el correo también sale de tu inbox y se clasifica
+    sincronizarCorreosDeTareaConGmail(idsCorreo, `Delegado a ${nuevoResponsable.trim()}`)
     refresh()
     if(sel?.id===id) setSel(s=> s?{...s, responsable:nuevoResponsable.trim(), turnoActual:nuevoResponsable.trim()}:s)
-    showToast(`👥 Delegado a ${nuevoResponsable.trim()}`)
+    showToast(`👥 Delegado a ${nuevoResponsable.trim()} — correo archivado`)
     setDelegarTarget(null); setDelegarEmail('')
   }
   function marcarLeido(id){
@@ -2334,7 +2341,7 @@ export default function App(){
                 {viewCorreo.proc ? (
                   <>
                     <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:10}}>
-                      <button className="btn sm primary" onClick={()=>{ marcarProcesoListo(viewCorreo.proc.id); setViewCorreo(vc=> vc?{...vc, proc:{...vc.proc, estado:'COMPLETADO'}}:vc); showToast('✅ Marcado como hecho') }}><Check size={13}/> Ya se hizo</button>
+                      <button className="btn sm primary" onClick={()=>{ marcarProcesoListo(viewCorreo.proc.id); setTimeout(()=>setViewCorreo(null), 700) }}><Check size={13}/> Ya se hizo — archivar</button>
                       <button className={`btn sm ${viewCorreo.proc.destacado?'primary':''}`} onClick={()=>{ toggleResaltar(viewCorreo.proc.id); setViewCorreo(vc=> vc?{...vc, proc:{...vc.proc, destacado:!vc.proc.destacado}}:vc) }}><Star size={13} fill={viewCorreo.proc.destacado?"currentColor":"none"}/> {viewCorreo.proc.destacado?'Quitar resaltado':'Resaltar'}</button>
                       <button className="btn sm" onClick={()=>{ setDelegarTarget(viewCorreo.proc); }}><UserPlus size={13}/> Delegar</button>
                       <button className="btn sm" onClick={()=>{ const d=new Date(viewCorreo.proc.fechaLimite); d.setDate(d.getDate()+1); updateProceso(viewCorreo.proc.id,{fechaLimite:fechaLocalISO(d)}); agregarHistorial(viewCorreo.proc.id,{icon:'⏰',texto:`Pospuesto a ${fechaLocalISO(d)} desde visor`}); refresh(); setViewCorreo(vc=> vc?{...vc, proc:{...vc.proc, fechaLimite:fechaLocalISO(d)}}:vc); showToast('⏰ Pospuesto 1 día') }}>⏰ Mañana</button>
