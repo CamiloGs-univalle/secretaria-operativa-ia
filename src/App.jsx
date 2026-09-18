@@ -1389,8 +1389,7 @@ export default function App(){
 
         <main className="main">
           {tab==='dashboard' && (
-            <div className="dashboard-compact">
-              <div className="dashboard-compact-inner">
+            <div className="dashboard-flow">
               <div className="live-banner">
                 {gmailConectado ? (
                   <span className="mono live-label">🔴 DATOS REALES — {session.email} • {correos.length} correos analizados • Inbox ordenado por prioridad</span>
@@ -1632,7 +1631,6 @@ export default function App(){
                     </div>
                     </div>
                   </div>
-              </div>
               </div>
             )}
 
