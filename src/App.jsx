@@ -2195,7 +2195,6 @@ export default function App(){
         </div>
       )}
 
-      <footer style={{textAlign:'center',padding:'16px 0 24px',fontSize:11,color:'var(--muted)'}} className="mono">Mi Asistente • Más enfoque, menos correos. • {new Date().toLocaleDateString()}</footer>
     </div>
   )
 }
