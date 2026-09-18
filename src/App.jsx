@@ -1679,7 +1679,7 @@ export default function App(){
                       {seleccionados.size>0 && <button className="btn sm ghost" onClick={()=>setSeleccionados(new Set())}>Deseleccionar</button>}
                       <span className="mono" style={{fontSize:11,color:'var(--muted)',alignSelf:'center',marginLeft:8}}>💡 Marca la casilla para acciones masivas, o haz clic en el correo para leerlo completo.</span>
                     </div>
-                    <div className="bandeja-scroll" style={{maxHeight:'520px'}}>
+                    <div className="bandeja-scroll">
                       {inboxFiltrado.map(({correo,a})=>(
                         <div key={correo.id} style={{display:'flex',alignItems:'flex-start',gap:8}}>
                           <input type="checkbox" style={{marginTop:18}} checked={seleccionados.has(correo.id)} onChange={()=>toggleSeleccion(correo.id)}/>
