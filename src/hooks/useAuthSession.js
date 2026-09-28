@@ -38,24 +38,46 @@ export function useAuthSession({ setProcesos, showToast }){
 
   // Firebase primero (cualquier Google) → luego Composio Gmail → luego demo
   useEffect(()=>{
-    const unsub = onFirebaseAuthChange(async (fbUser)=>{
-      if(fbUser){
-        setModoAlmacenamiento(false)
-        setSession(fbUser)
-        // Carga inicial Firestore — cada persona ve solo SUS propios procesos
-        // (filtrado por dueño, ver mockFirebase.js), nunca los de otra cuenta.
-        const fbList = await fetchProcesosFirestore(fbUser.email)
-        if(fbList) setProcesos(fbList)
-        return
-      }
-      // No Firebase: revisa Composio Gmail o demo
+    let resuelto = false
+    // Sin Firebase (o si Firebase no responde): Gmail conectado (Composio) → demo → pantalla de inicio.
+    async function sinFirebase(){
       const real = await fetchRealSession()
+      if(resuelto) return
+      resuelto = true
       if(real){ setModoAlmacenamiento(false); setSession({ nombre: real.name || real.email, email: real.email, real:true }); return }
       const demo = getDemoUser()
       if(demo){ setModoAlmacenamiento(true); setSession({ ...demo, real:false }); return }
       setModoAlmacenamiento(true); setSession(null)
-    })
-    return ()=> unsub && unsub()
+    }
+    // Red de seguridad: si Firebase Auth no avisa en 6 s (IndexedDB bloqueado,
+    // extensión, red), no dejar a la persona mirando "Verificando sesión…" para siempre.
+    const guardia = setTimeout(()=>{ if(!resuelto){ console.warn('[auth] Firebase no respondió en 6 s — continúo sin esperar'); sinFirebase() } }, 6000)
+    let unsub = null
+    try{
+      unsub = onFirebaseAuthChange(async (fbUser)=>{
+        try{
+          if(fbUser){
+            resuelto = true; clearTimeout(guardia)
+            setModoAlmacenamiento(false)
+            setSession(fbUser)
+            // Carga inicial Firestore — cada persona ve solo SUS propios procesos.
+            const fbList = await fetchProcesosFirestore(fbUser.email)
+            if(fbList) setProcesos(fbList)
+            return
+          }
+          clearTimeout(guardia)
+          if(!resuelto) await sinFirebase()
+          else setSession(s=> s?.firebase ? null : s) // cerró sesión de Google
+        }catch(e){
+          console.error('[auth] error verificando sesión', e)
+          if(!resuelto){ resuelto = true; setSession(null) }
+        }
+      })
+    }catch(e){
+      console.error('[auth] Firebase Auth no disponible', e)
+      clearTimeout(guardia); sinFirebase()
+    }
+    return ()=>{ clearTimeout(guardia); unsub && unsub() }
   },[])
 
   // Suscripción Firestore en vivo cuando hay sesión Firebase — filtrada por

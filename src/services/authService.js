@@ -37,7 +37,9 @@ export function onFirebaseAuthChange(cb){
 // Composio Gmail real (opcional, después del login Firebase)
 export async function fetchRealSession(){
   try{
-    const r = await fetch('/api/auth/me', { credentials: 'same-origin' })
+    // Máximo 8 s: si el servidor no contesta, la app sigue en vez de quedarse en "Verificando sesión…".
+    const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 8000)
+    const r = await fetch('/api/auth/me', { credentials: 'same-origin', signal: ctrl.signal }).finally(() => clearTimeout(t))
     if(!r.ok) return null
     const j = await r.json()
     return j.connected ? j : null
