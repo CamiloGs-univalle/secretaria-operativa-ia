@@ -95,4 +95,6 @@ Esta división es sobre **quién lidera** cada área, no una prohibición absolu
 
 - 2026-09-28 (2) — **Claude**: Secretaria IA con Gemini (pedido del Señor: asistente "más vivo", que responda lo que sea, recuerde y haga seguimiento/etiquete correos). Nuevo `api/ai/[accion].js` (**12/12 funciones de Vercel Hobby — no agregar más sin fusionar**), chat con acciones confirmables, memoria en Firestore `usuarios/{uid}`, revisión automática de hilos que actualiza/crea tareas (campos nuevos `iaEtiquetas`, `iaEstado`, `iaResumen`, `iaFalta`, `iaSiguientePaso`). Requiere `GEMINI_API_KEY` (ver COMPOSIO_SETUP.md §8).
 
+- 2026-09-28 (3) — **Claude**: entrenamiento personal de la secretaria IA — `useEntrenamientoIA` (Firestore `usuarios/{uid}.entrenamiento`), `EntrenamientoPanel` en Configuración, `CorregirModal` (menú ⋮ de la Bandeja) que guarda correcciones como ejemplos, acción de chat `agregar_regla`, y `api/ai/[accion].js` usa perfil/reglas/etiquetas propias/estilo/ejemplos en chat y clasificación.
+
 <!-- Agentes: agreguen una línea nueva arriba de esta, con fecha, quién y qué, cada vez que terminen algo importante. -->

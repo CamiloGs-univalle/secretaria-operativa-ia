@@ -3,6 +3,7 @@ import { updateProceso, addProceso, audit, getProcesos } from '../data/mockFireb
 import { clasificarHilosIA, etiquetarGmailIA } from '../services/aiService.js'
 import { fechaLocalISO } from '../utils/dateUtils.js'
 import { correoDeRemitente } from '../utils/contactoUtils.js'
+import { evaluarReglas } from './useEntrenamientoIA.js'
 
 // La secretaria revisa cada conversación de la bandeja con IA: la etiqueta,
 // decide si ya se cerró, si le falta algo o a quién le toca, y actualiza la
@@ -12,7 +13,9 @@ const LOTE = 10, MAX_POR_RONDA = 30
 const ESTADO_PROCESO = { CERRADO: 'COMPLETADO', ESPERANDO_OTRO: 'ESPERANDO', PENDIENTE_MI_RESPUESTA: 'PENDIENTE', FALTA_INFO: 'PENDIENTE' }
 const CERRADOS = ['COMPLETADO', 'CERRADO', 'CANCELADO']
 
-export function useClasificacionIA({ session, iaConfigurada, correos, procesos, refresh, configuracion, gmailConectado, agregarMensajeAsistente, showToast }){
+export function useClasificacionIA({ session, iaConfigurada, correos, procesos, refresh, configuracion, gmailConectado, agregarMensajeAsistente, showToast, entrenamiento }){
+  const entRef = useRef(entrenamiento)
+  entRef.current = entrenamiento
   const clave = session?.email ? `mi_asistente_ia_${session.email}` : null
   const [iaPorHilo, setIaPorHilo] = useState({})
   const [clasificando, setClasificando] = useState(false)
@@ -48,10 +51,17 @@ export function useClasificacionIA({ session, iaConfigurada, correos, procesos, 
         const r = await clasificarHilosIA(lote.map(h => ({
           hiloId: h.hiloId, asunto: h.msgs[0].asunto,
           mensajes: h.msgs.map(m => ({ de: correoDeRemitente(m.remitente) === miEmail ? `YO (${miEmail})` : m.remitente, para: (m.destinatarios || []).join(', '), fecha: m.fecha, texto: m.cuerpo })),
-        })), fechaLocalISO())
+        })), fechaLocalISO(), entRef.current)
         for(const res of r.hilos || []){
           const h = lote.find(x => x.hiloId === res.hiloId)
-          if(h) resultados.push({ ...res, firma: h.firma, ultimoId: h.msgs[h.msgs.length - 1].id, msgs: h.msgs })
+          if(!h) continue
+          // Reglas de la persona: se aplican siempre, aunque la IA opine distinto.
+          const ult = h.msgs[h.msgs.length - 1]
+          const rg = evaluarReglas(entRef.current, { remitente: h.msgs.map(m => m.remitente).join(' '), asunto: h.msgs[0].asunto, cuerpo: ult.cuerpo })
+          if(rg.ignorar && !rg.vip){ res.estado = res.estado === 'CERRADO' ? 'CERRADO' : 'INFORMATIVO'; res.prioridad = 'BAJA' }
+          if(rg.vip && ['MEDIA', 'BAJA'].includes(res.prioridad)) res.prioridad = 'ALTA'
+          if(rg.clave && ['MEDIA', 'BAJA'].includes(res.prioridad)) res.prioridad = 'ALTA'
+          resultados.push({ ...res, firma: h.firma, ultimoId: ult.id, msgs: h.msgs })
         }
       }
 
@@ -134,7 +144,28 @@ export function useClasificacionIA({ session, iaConfigurada, correos, procesos, 
     return () => clearTimeout(t)
   }, [auto, iaConfigurada, correos, clasificar])
 
-  return { iaPorHilo, clasificando, clasificarAhora: () => clasificar({ forzar: false }) }
+  // Corrección manual de la persona para un hilo: se guarda en la caché (la
+  // bandeja lo refleja ya) y se aplica a su tarea.
+  const corregirHilo = useCallback(async (hiloId, { estado, etiqueta, falta }) => {
+    let cache = {}
+    try{ cache = JSON.parse(localStorage.getItem(clave) || '{}') }catch{}
+    const prev = cache[hiloId] || {}
+    cache[hiloId] = { ...prev, hiloId, estado, etiquetas: [etiqueta, ...(prev.etiquetas || []).filter(x => x !== etiqueta)].filter(Boolean).slice(0, 3), falta: falta ?? prev.falta ?? '', corregido: true }
+    try{ localStorage.setItem(clave, JSON.stringify(cache)) }catch{}
+    setIaPorHilo(cache)
+    const p = getProcesos().find(x => x.hiloId === hiloId)
+    if(p && !CERRADOS.includes(p.estado) && ESTADO_PROCESO[estado]){
+      await updateProceso(p.id, {
+        iaEstado: estado, iaEtiquetas: cache[hiloId].etiquetas, iaFalta: cache[hiloId].falta,
+        estado: ESTADO_PROCESO[estado], turnoActual: estado === 'ESPERANDO_OTRO' ? 'OTRA_PERSONA' : 'COORDINADORA',
+        ...(estado === 'CERRADO' ? { fechaCierre: new Date().toISOString() } : {}),
+        historial: [...(p.historial || []), { fecha: fechaLocalISO(), icon: '🎓', texto: `Corregido por ti: ${textoEstado(estado)}${etiqueta ? ` · ${etiqueta}` : ''}` }],
+      })
+      refresh?.()
+    }
+  }, [clave, refresh])
+
+  return { iaPorHilo, clasificando, clasificarAhora: () => clasificar({ forzar: false }), reanalizarTodo: () => clasificar({ forzar: true }), corregirHilo }
 }
 
 function textoEstado(e){

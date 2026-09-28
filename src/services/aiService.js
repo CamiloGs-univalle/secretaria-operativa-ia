@@ -22,5 +22,5 @@ async function pedir(ruta, body){
 
 export const estadoIA = () => pedir('status')
 export const chatIA = (mensajes, contexto) => pedir('chat', { mensajes, contexto })
-export const clasificarHilosIA = (hilos, hoy) => pedir('clasificar', { hilos, hoy })
+export const clasificarHilosIA = (hilos, hoy, entrenamiento) => pedir('clasificar', { hilos, hoy, entrenamiento })
 export const etiquetarGmailIA = (items) => pedir('etiquetar-gmail', { items })

@@ -36,6 +36,9 @@ import { useMemoriaAsistente } from './hooks/useMemoriaAsistente.js'
 import { useClasificacionIA } from './hooks/useClasificacionIA.js'
 import { estadoIA } from './services/aiService.js'
 import ChatMensaje from './components/ChatMensaje.jsx'
+import { useEntrenamientoIA } from './hooks/useEntrenamientoIA.js'
+import EntrenamientoPanel from './components/EntrenamientoPanel.jsx'
+import CorregirModal from './components/CorregirModal.jsx'
 
 // Íconos lineales únicos (Lucide, sección 42 de la especificación) para cada
 // pestaña del sidebar — reemplazan los emoji sueltos que usaba cada quien a
@@ -104,6 +107,8 @@ export default function App(){
   useEffect(()=>{ if(!session?.real){ setIa({configured:false}); return } estadoIA().then(setIa).catch(()=>setIa({configured:false})) },[session?.real, session?.email])
   const { memoria, recordar, olvidar } = useMemoriaAsistente(session?.real ? session.email : null)
   const iaPorHiloRef = useRef({})
+  const { entrenamiento, actualizar: actualizarEntrenamiento, agregarRegla, quitarRegla, agregarEjemplo, guardado: entrenamientoGuardado } = useEntrenamientoIA(session?.real ? session.email : null)
+  const [corrigiendo,setCorrigiendo]=useState(null) // correo que la persona está corrigiendo
 
   // Lo que la secretaria puede hacer cuando la persona confirma una acción.
   const buscarProceso = id => { const p = procesos.find(x=>x.id===id); if(!p) throw new Error('No encontré esa tarea'); return p }
@@ -125,6 +130,11 @@ export default function App(){
       abrirResponder(c); if(a.cuerpo) setReply(r=> r?{...r, cuerpo:a.cuerpo}:r)
       return 'Borrador abierto — revísalo y envíalo tú'
     },
+    agregar_regla: async a => {
+      const nombres = { vip:'Remitente VIP', palabrasClave:'Tema importante', ignorar:'Ignorar' }
+      if(!agregarRegla(a.reglaTipo, a.valor)) throw new Error('Regla inválida')
+      return `${nombres[a.reglaTipo]||'Regla'}: ${a.valor}`
+    },
     agendar_calendar: async a => {
       if(!gcal.connected) throw new Error('Primero conecta Google Calendar en Configuración')
       const r = await enviarTareaACalendar(buscarProceso(a.procesoId), { hora:/^\d{2}:\d{2}$/.test(a.hora||'')?a.hora:'09:00' })
@@ -132,9 +142,9 @@ export default function App(){
     },
   }
 
-  const { chatOpen, setChatOpen, chatInput, setChatInput, chatMessages, setChatMessages, chatEnviando, enviarPreguntaChat, resolverAccion, agregarMensajeAsistente, borrarConversacion } = useAsistenteChat({ session, iaConfigurada: ia.configured, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, getIaPorHilo: ()=>iaPorHiloRef.current, memoria, recordar, olvidar, ejecutores: ejecutoresIA, showToast, sel, setSel, setRecordatoriosGenerales })
+  const { chatOpen, setChatOpen, chatInput, setChatInput, chatMessages, setChatMessages, chatEnviando, enviarPreguntaChat, resolverAccion, agregarMensajeAsistente, borrarConversacion } = useAsistenteChat({ session, iaConfigurada: ia.configured, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, getIaPorHilo: ()=>iaPorHiloRef.current, memoria, entrenamiento, recordar, olvidar, ejecutores: ejecutoresIA, showToast, sel, setSel, setRecordatoriosGenerales })
 
-  const { iaPorHilo, clasificando, clasificarAhora } = useClasificacionIA({ session, iaConfigurada: ia.configured, correos, procesos, refresh, configuracion, gmailConectado, agregarMensajeAsistente, showToast })
+  const { iaPorHilo, clasificando, clasificarAhora, reanalizarTodo, corregirHilo } = useClasificacionIA({ session, iaConfigurada: ia.configured, correos, procesos, refresh, configuracion, gmailConectado, agregarMensajeAsistente, showToast, entrenamiento })
   iaPorHiloRef.current = iaPorHilo
 
   // --- Fila de correo estilo mockup — un solo componente usado tanto en el
@@ -174,6 +184,7 @@ export default function App(){
               <button onClick={()=>{setMailMenuAbierto(null); const p=procesos.find(x=>x.correos?.includes(correo.id)); if(p){setSel(p); setTab('procesos')} else { const h=procesos.find(x=>x.hiloId===correo.hiloId); if(h){setSel(h); setTab('procesos')} else showToast('Correo informativo — no genera ninguna tarea')}}}>🗂 Ver tarea</button>
               <button onClick={()=>{setMailMenuAbierto(null); marcarLeido(correo.id)}}>✓ Marcar leído</button>
               <button onClick={()=>{setMailMenuAbierto(null); archivarCorreo(correo.id)}}>🗄 Archivar</button>
+              {session?.real && <button onClick={()=>{setMailMenuAbierto(null); setCorrigiendo(correo)}}>🎓 Corregir a la secretaria</button>}
             </div>
           )}
         </div>
@@ -620,6 +631,26 @@ export default function App(){
             </>
           )}
 
+          {corrigiendo && (
+            <div className="modal-overlay" onClick={()=>setCorrigiendo(null)}>
+              <CorregirModal
+                correo={corrigiendo}
+                actual={iaPorHilo[corrigiendo.hiloId]}
+                etiquetasPropias={entrenamiento.etiquetas}
+                onCerrar={()=>setCorrigiendo(null)}
+                onVip={()=>{ const e=correoDeRemitente(corrigiendo.remitente); if(e) agregarRegla('vip', e) }}
+                onGuardar={async({estado, etiqueta, falta, nota})=>{
+                  const c = corrigiendo
+                  agregarEjemplo({ asunto:c.asunto.slice(0,150), de:correoDeRemitente(c.remitente), extracto:String(c.cuerpo||'').slice(0,300), estado, etiqueta, nota })
+                  await corregirHilo(c.hiloId, { estado, etiqueta, falta })
+                  audit('ia_correccion', { hilo:c.hiloId, estado, etiqueta })
+                  setCorrigiendo(null)
+                  showToast('🎓 Gracias — la secretaria lo tendrá en cuenta')
+                }}
+              />
+            </div>
+          )}
+
           {taskModal && (
             <div className="modal-overlay" onClick={()=>setTaskModal(null)}>
               {taskModal.mode==='view' ? (
@@ -909,6 +940,15 @@ export default function App(){
                   </form>
                 </div>
               </div>
+
+              {session.real && (
+                <EntrenamientoPanel
+                  entrenamiento={entrenamiento} actualizar={actualizarEntrenamiento}
+                  agregarRegla={agregarRegla} quitarRegla={quitarRegla} guardado={entrenamientoGuardado}
+                  iaActiva={ia.configured} reanalizando={clasificando} onReanalizar={reanalizarTodo}
+                  onProbar={()=>{ setTab('dashboard'); enviarPreguntaChat('Explícame en pocas líneas qué entendiste de mi entrenamiento: quién soy, qué es importante para mí, mis reglas y mis etiquetas. ¿Te falta algo por saber para ayudarme mejor?') }}
+                />
+              )}
 
               <div className="settings-section">
                 <div className="settings-section-title"><RefreshCw size={15}/> Integraciones</div>

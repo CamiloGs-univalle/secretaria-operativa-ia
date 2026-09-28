@@ -3,7 +3,7 @@ import { nombreDeRemitente } from '../utils/contactoUtils.js'
 
 // Resumen compacto de los datos reales de la sesión para la secretaria IA.
 // Se limita el tamaño para no gastar cuota ni mandar más de lo necesario.
-export function construirContextoIA({ session, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, iaPorHilo, memoria }){
+export function construirContextoIA({ session, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, iaPorHilo, memoria, entrenamiento }){
   const cerrados = ['COMPLETADO', 'CERRADO', 'CANCELADO']
   const activos = procesos.filter(p => !cerrados.includes(p.estado))
   const recientesCerrados = procesos.filter(p => cerrados.includes(p.estado))
@@ -22,6 +22,7 @@ export function construirContextoIA({ session, procesos, correos, seguimientosFl
     zona: Intl.DateTimeFormat().resolvedOptions().timeZone,
     nombre: session?.nombre,
     memoria: (memoria || []).map(m => m.texto),
+    entrenamiento,
     tareas: [...activos.slice(0, 60).map(tarea), ...recientesCerrados.map(tarea)],
     correos: correosOrden.map(c => {
       const ia = iaPorHilo?.[c.hiloId]

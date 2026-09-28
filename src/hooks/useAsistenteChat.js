@@ -11,7 +11,7 @@ import { parsearFechaNatural } from '../utils/textoUtils.js'
 // La conversación se guarda por cuenta en este navegador.
 const MAX_HIST = 60
 
-export function useAsistenteChat({ session, iaConfigurada, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, getIaPorHilo, memoria, recordar, olvidar, ejecutores, showToast, sel, setSel, setRecordatoriosGenerales }){
+export function useAsistenteChat({ session, iaConfigurada, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, getIaPorHilo, memoria, entrenamiento, recordar, olvidar, ejecutores, showToast, sel, setSel, setRecordatoriosGenerales }){
   const clave = session?.email ? `mi_asistente_chat_${session.email}` : null
   const [chatOpen,setChatOpen]=useState(false)
   const [chatInput,setChatInput]=useState('')
@@ -49,7 +49,7 @@ export function useAsistenteChat({ session, iaConfigurada, procesos, correos, se
     setChatEnviando(true)
     try{
       if(iaConfigurada){
-        const contexto = construirContextoIA({ session, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, iaPorHilo: getIaPorHilo?.(), memoria })
+        const contexto = construirContextoIA({ session, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, iaPorHilo: getIaPorHilo?.(), memoria, entrenamiento })
         const r = await chatIA(nuevoHist.map(m=>({ de:m.de, texto:m.texto })), contexto)
         if(r.recordar?.length) recordar(r.recordar)
         if(r.olvidar?.length) olvidar(r.olvidar)

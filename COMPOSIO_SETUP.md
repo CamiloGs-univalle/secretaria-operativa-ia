@@ -151,3 +151,14 @@ etiquetar-gmail), `src/services/aiService.js`, `src/engine/contextoIA.js`,
 - El texto de los correos se trata como datos, no como instrucciones.
 
 Límite de Vercel Hobby: con esta función el proyecto usa 12/12 funciones.
+
+### Entrenamiento personal (Configuración → "Entrena a tu secretaria")
+Cada persona define: cargo y qué es importante para ella, remitentes VIP,
+temas importantes, cosas a ignorar, etiquetas propias (con cuándo usarlas),
+tono/trato/firma de sus correos e instrucciones libres. Se guarda en
+Firestore `usuarios/{uid}.entrenamiento` (+ copia local) y se envía a Gemini
+en el chat y en la revisión del correo. Las reglas VIP / temas / ignorar
+además se aplican de forma determinística sobre la prioridad.
+Aprende de: (1) "🎓 Corregir a la secretaria" en el menú ⋮ de cada correo
+(guarda la corrección como ejemplo, hasta 40), y (2) el chat, donde puede
+proponer la acción `agregar_regla` ("de ahora en adelante…").
