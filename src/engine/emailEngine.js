@@ -1,3 +1,4 @@
+import { fechaLocalISO } from '../utils/dateUtils.js'
 // Motor inteligente — pipeline completo según doc sección 5-15, 38-58
 export const CATEGORIAS = {
   INFORMATIVO:'INFORMATIVO', SOLICITUD:'SOLICITUD', SEGUIMIENTO:'SEGUIMIENTO', RESPUESTA:'RESPUESTA', CONFIRMACION:'CONFIRMACION', FINALIZACION:'FINALIZACION', INCIDENCIA:'INCIDENCIA', REPROGRAMACION:'REPROGRAMACION', URGENTE:'URGENTE', NO_RELEVANTE:'NO_RELEVANTE'
@@ -82,31 +83,20 @@ export function detectarFechas(email){
   let esFechaLimite=false
   if(fechaTexto){
     const lower=fechaTexto.toLowerCase()
-    // Fecha LOCAL (Colombia, UTC-5) — new Date() sin parámetros usa zona local
+    // Fecha LOCAL (no UTC): cerca de medianoche en Colombia toISOString()
+    // devolvía el día siguiente. `diaLocal` suma días al día de hoy local.
     const hoy=new Date()
-    const y=hoy.getFullYear(), m=hoy.getMonth(), d=hoy.getDate()
-    if(lower.includes('mañana') && !lower.includes('pasado')) { 
-      const d=new Date(y, m, d+1); 
-      fechaCalculada=d.toISOString().slice(0,10); 
-      esFechaLimite=/necesitamos|antes|entregar|enviar/i.test(body) 
+    const diaLocal=(n)=> fechaLocalISO(new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate()+n))
+    if(lower.includes('mañana') && !lower.includes('pasado')) {
+      fechaCalculada=diaLocal(1)
+      esFechaLimite=/necesitamos|antes|entregar|enviar/i.test(body)
     }
-    else if(lower.includes('pasado mañana')){ 
-      const d=new Date(y, m, d+2); 
-      fechaCalculada=d.toISOString().slice(0,10) 
-    }
-    else if(lower.includes('hoy')) { 
-      const d=new Date(y, m, d); 
-      fechaCalculada=d.toISOString().slice(0,10) 
-    }
+    else if(lower.includes('pasado mañana')) fechaCalculada=diaLocal(2)
+    else if(lower.includes('hoy')) fechaCalculada=diaLocal(0)
     else if(/lunes|martes|miércoles|jueves|viernes/i.test(lower)){
       const dias={lunes:1,martes:2,'miércoles':3,miercoles:3,jueves:4,viernes:5}
       const target=dias[lower.replace('el ','').trim()]
-      if(target){
-        const d=new Date(y, m, d)
-        const diff=(target - d.getDay() + 7) % 7 || 7
-        d.setDate(d.getDate() + diff)
-        fechaCalculada=d.toISOString().slice(0,10)
-      }
+      if(target) fechaCalculada=diaLocal((target - hoy.getDay() + 7) % 7 || 7)
     }
   }
   // horas

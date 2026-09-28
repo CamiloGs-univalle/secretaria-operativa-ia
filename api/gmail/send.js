@@ -106,5 +106,3 @@ export default async function handler(req, res){
   // SIN sesión real conectada (ni cuenta fija) — error honesto, NUNCA simular.
   return res.status(403).json({ error:'gmail_no_conectado', message:'Conecte su Gmail real para envío real. No se simulan envíos.' })
 }
-
-function sinCRLF(s){ return String(s || '').replace(/[\r\n]+/g, ' ').trim() }

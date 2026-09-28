@@ -97,4 +97,6 @@ Esta división es sobre **quién lidera** cada área, no una prohibición absolu
 
 - 2026-09-28 (3) — **Claude**: entrenamiento personal de la secretaria IA — `useEntrenamientoIA` (Firestore `usuarios/{uid}.entrenamiento`), `EntrenamientoPanel` en Configuración, `CorregirModal` (menú ⋮ de la Bandeja) que guarda correcciones como ejemplos, acción de chat `agregar_regla`, y `api/ai/[accion].js` usa perfil/reglas/etiquetas propias/estilo/ejemplos en chat y clasificación.
 
+- 2026-09-28 (4) — **Claude**: la app no iniciaba en producción. Causa: commit `8dd620e` (OpenCode) en `src/engine/emailEngine.js` → `detectarFechas` declaraba `const d=new Date(y, m, d+1)` (usa `d` antes de inicializarse) → `ReferenceError` con cualquier correo que dijera "mañana", "hoy" o un día de la semana. Corregido con `fechaLocalISO`. El mismo commit dejó `sinCRLF` declarada dos veces en `api/gmail/send.js` → la función de envío no cargaba (SyntaxError): corregido. **OpenCode: antes de commitear corre `npm run build` y `node --check api/**/*.js`, y prueba la app abierta.**
+
 <!-- Agentes: agreguen una línea nueva arriba de esta, con fecha, quién y qué, cada vez que terminen algo importante. -->
