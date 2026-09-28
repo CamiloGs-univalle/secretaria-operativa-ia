@@ -1,94 +1,92 @@
 *{margin:0;padding:0;box-sizing:border-box}
 :root{
-  /* === PALETA "MI ASISTENTE" — ajustada a la especificación formal de 58
-     secciones enviada por el Señor (2026-09-16), valores hex exactos de su
-     sección 38. Mismas variables que ya consumía toda la app (--accent,
-     --bg, --text, etc.) — solo se afinan los VALORES, así que todo el CSS
-     existente se retiñe solo, sin renombrar nada. === */
-  --bg:#F8FAFC;
-  --bg2:#EEF3F8;
-  --bg3:#E7EFF6;
+  /* === PALETA "MAILASSISTANT" — retema completo pedido por el Señor
+     (2026-09-18): mockup navy/azul (deepseek_html_20260918_03d7fe.html),
+     tal cual, con cada módulo. Mismas variables que ya consumía toda la
+     app (--accent, --bg, --text, etc.) — se cambian los VALORES para que
+     todo el CSS existente se retiña solo, sin renombrar nada. === */
+  --bg:#F4F7F9;
+  --bg2:#EEF2F6;
+  --bg3:#E9EEF3;
   --card:#ffffff;
-  --card2:#F8FAFC;
+  --card2:#F8FAFB;
   --card-hover:#F1F5F9;
   --border:#E2E8F0;
   --border2:#CBD5E1;
   --border-strong:#94A3B8;
-  --text:#17324D;
-  --text2:#0F2A1E;
-  --muted:#64748B;
-  --muted2:#94A3B8;
-  /* Primarios — verde principal exacto de la especificación (sección 38) */
-  --accent:#18875F;
-  --accent2:#22A374;
-  --accent-light:#E7F7EF;
-  --accent-border:#A7E5CB;
-  --accent-gradient:linear-gradient(135deg,#0F5C40 0%,#18875F 45%,#22A374 100%);
-  --accent-gradient-soft:linear-gradient(135deg,rgba(24,135,95,0.08) 0%,rgba(34,163,116,0.08) 100%);
+  --text:#1A202C;
+  --text2:#12213D;
+  --muted:#718096;
+  --muted2:#A0AEC0;
+  /* Primarios — azul exacto del mockup (--color-blue:#4b7bec) */
+  --accent:#4B7BEC;
+  --accent2:#2563EB;
+  --accent-light:#E5EFFF;
+  --accent-border:#BDD3FF;
+  --accent-gradient:linear-gradient(135deg,#2563EB 0%,#4B7BEC 55%,#6C93F5 100%);
+  --accent-gradient-soft:linear-gradient(135deg,rgba(75,123,236,0.08) 0%,rgba(37,99,235,0.08) 100%);
   --secondary:#0D9488;
   --secondary-light:#F0FDFA;
-  --cta:#F43F5E;
-  --cta-hover:#E11D48;
-  --cta-light:#FFF1F2;
-  --green:#18875F;
-  --green-bg:#E7F7EF;
-  --green-border:#A7E5CB;
-  --info:#3B82F6;
-  --info-bg:#EFF6FF;
-  --orange:#F59E0B;
-  --orange-bg:#FFFBEB;
-  --red:#EF4444;
-  --red-bg:#FEF2F2;
-  --yellow:#EAB308;
+  --cta:#FF4B4B;
+  --cta-hover:#E63939;
+  --cta-light:#FFE5E5;
+  --green:#2ECC71;
+  --green-bg:#E5F9EE;
+  --green-border:#A7E9C5;
+  --info:#4B7BEC;
+  --info-bg:#E5EFFF;
+  --orange:#FF9F43;
+  --orange-bg:#FFF0E0;
+  --red:#FF4B4B;
+  --red-bg:#FFE5E5;
+  --yellow:#FFC107;
+  --yellow-bg:#FFF8E1;
   --violet:#8B5CF6;
   --pink:#EC4899;
-  /* Sidebar — verde petróleo oscuro sólido exacto de la especificación */
-  --sidebar-bg:#073B3A;
-  --sidebar-text:#EAF7EF;
-  --sidebar-muted:#8FB8AE;
-  --sidebar-active:linear-gradient(135deg,#18875F,#22A374);
+  /* Sidebar — azul marino oscuro sólido exacto del mockup */
+  --sidebar-bg:#0B1A30;
+  --sidebar-text:#FFFFFF;
+  --sidebar-muted:#A0AEC0;
+  --sidebar-active:#1D3D73;
   --sidebar-hover:rgba(255,255,255,0.06);
-  --sidebar-border:rgba(255,255,255,0.08);
-  /* Sombras neutras y suaves (sección 41 — nada de sombras "de color") */
-  --shadow:0 2px 8px rgba(15,23,42,0.04);
-  --shadow-md:0 4px 16px rgba(15,23,42,0.06);
-  --shadow-lg:0 8px 24px rgba(15,23,42,0.08);
-  --shadow-violet:0 8px 24px rgba(24,135,95,0.20);
-  --radius:16px;
-  --radius-sm:10px;
-  --radius-lg:22px;
+  --sidebar-border:rgba(255,255,255,0.10);
+  /* Sombras del mockup (más visibles que la paleta anterior) */
+  --shadow:0 1px 3px rgba(0,0,0,0.05);
+  --shadow-md:0 4px 6px rgba(0,0,0,0.05);
+  --shadow-lg:0 10px 25px rgba(0,0,0,0.10);
+  --shadow-violet:0 8px 20px rgba(75,123,236,0.35);
+  --radius:12px;
+  --radius-sm:8px;
+  --radius-lg:16px;
   --radius-pill:999px;
 }
 [data-theme="dark"]{
   --bg:#0B1420;
   --bg2:#101B2A;
-  --bg3:#0F2A1E;
+  --bg3:#0F1D2E;
   --card:#101B2A;
   --card2:#13233570;
   --card-hover:#16283B;
   --border:rgba(148,163,184,0.20);
   --border2:rgba(148,163,184,0.30);
   --text:#EAF2FA;
-  --text2:#A7F3D0;
+  --text2:#BFD6FF;
   --muted:#94A7BD;
   --muted2:#5B7A94;
-  --accent:#34D399;
-  --accent-light:rgba(52,211,153,0.15);
-  --accent-border:rgba(52,211,153,0.25);
-  --sidebar-bg:#052422;
+  --accent:#6C93F5;
+  --accent-light:rgba(108,147,245,0.15);
+  --accent-border:rgba(108,147,245,0.28);
+  --sidebar-bg:#060F1E;
   --shadow:0 2px 10px rgba(0,0,0,0.35);
   --shadow-md:0 6px 20px rgba(0,0,0,0.45);
 }
 html{scroll-behavior:smooth}
 body{font-family:'Inter','Plus Jakarta Sans',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased;line-height:1.5}
-/* Fondo casi plano — la especificación pide "blanco ligeramente grisáceo",
-   sin manchas de color grandes (sección 39: los colores fuertes solo para
-   estados/prioridades). Se deja apenas un insinuado, no un aurora. */
-body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(ellipse 900px 500px at 15% -10%, rgba(24,135,95,0.035), transparent 60%)}
-[data-theme="dark"] body::before{background:radial-gradient(ellipse 900px 500px at 15% -10%, rgba(52,211,153,0.08), transparent 60%)}
+body::before{content:'';position:fixed;inset:0;pointer-events:none;z-index:-1;background:radial-gradient(ellipse 900px 500px at 15% -10%, rgba(75,123,236,0.035), transparent 60%)}
+[data-theme="dark"] body::before{background:radial-gradient(ellipse 900px 500px at 15% -10%, rgba(108,147,245,0.08), transparent 60%)}
 ::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-thumb{background:#A7E5CB;border-radius:10px}
-[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#0F5C40}
+::-webkit-scrollbar-thumb{background:#BDD3FF;border-radius:10px}
+[data-theme="dark"] ::-webkit-scrollbar-thumb{background:#2563EB}
 a{color:inherit;text-decoration:none}
 button{font-family:inherit;cursor:pointer}
 .mono{font-family:'JetBrains Mono',monospace;letter-spacing:-0.02em}
