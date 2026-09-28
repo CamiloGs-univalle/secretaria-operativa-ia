@@ -4,7 +4,10 @@
 async function pedir(url, opciones = {}){
   const r = await fetch(url, { credentials: 'same-origin', cache: 'no-store', ...opciones })
   const j = await r.json().catch(() => ({}))
-  if(!r.ok) throw new Error(j.note || j.error || `HTTP ${r.status}`)
+  if(!r.ok){
+    if(j.detalle) console.warn('[Calendar]', url, j.detalle)
+    throw new Error([j.note || j.error || `HTTP ${r.status}`, j.detalle].filter(Boolean).join(' — Detalle: '))
+  }
   return j
 }
 

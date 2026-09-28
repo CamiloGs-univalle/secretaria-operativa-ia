@@ -80,17 +80,35 @@ async function callback(req, res, session){
   }
 }
 
+// Composio tiene dos herramientas para leer eventos (EVENTS_LIST en
+// camelCase y FIND_EVENT en snake_case). Se prueba una y, si falla, la otra.
+async function leerEventos(session, tMin, tMax){
+  const intentos = [
+    { tool: 'GOOGLECALENDAR_EVENTS_LIST', args: { calendarId: 'primary', timeMin: tMin, timeMax: tMax, singleEvents: true, orderBy: 'startTime', maxResults: 250 } },
+    { tool: 'GOOGLECALENDAR_FIND_EVENT', args: { calendar_id: 'primary', time_min: tMin, time_max: tMax, single_events: true, order_by: 'startTime', max_results: 250 } },
+  ]
+  const errores = []
+  for(const it of intentos){
+    try{ return await ejecutarAccion({ ...it, connectedAccountId: session.calendarAccountId, entityId: session.email }) }
+    catch(e){ errores.push(e.message); console.warn('[calendar/events]', e.message) }
+  }
+  throw new Error(errores.join(' | '))
+}
+
+function extraerItems(d){
+  for(const c of [d.items, d.events, d.event_data?.items, d.event_data, d.response_data?.items, d.data?.items]){
+    if(Array.isArray(c)) return c
+  }
+  return []
+}
+
 async function events(req, res, session){
   const { timeMin, timeMax } = req.query || {}
   if(!timeMin || !timeMax || isNaN(Date.parse(timeMin)) || isNaN(Date.parse(timeMax))) return res.status(400).json({ error: 'rango_invalido' })
   try{
-    const j = await ejecutarAccion({
-      tool: 'GOOGLECALENDAR_EVENTS_LIST',
-      connectedAccountId: session.calendarAccountId,
-      args: { calendarId: 'primary', timeMin: new Date(timeMin).toISOString(), timeMax: new Date(timeMax).toISOString(), singleEvents: true, orderBy: 'startTime', maxResults: 250 },
-    })
+    const j = await leerEventos(session, new Date(timeMin).toISOString(), new Date(timeMax).toISOString())
     const d = datos(j)
-    const items = d.items || d.events || d.event_data?.items || []
+    const items = extraerItems(d)
     const eventos = (Array.isArray(items) ? items : [])
       .filter(e => e.status !== 'cancelled')
       .map(e => ({
@@ -105,7 +123,9 @@ async function events(req, res, session){
     res.json({ eventos, calendario: d.summary || null })
   }catch(e){
     console.error('[calendar/events]', e.message)
-    res.status(502).json({ error: 'no_se_pudo_leer_calendar', note: 'No se pudo leer tu Google Calendar. Si persiste, vuelve a conectarlo desde Configuración.' })
+    const permiso = /scope|permission|insufficient|403|unauthori[sz]ed|401|expired|invalid_grant/i.test(e.message)
+    res.status(502).json({ error: 'no_se_pudo_leer_calendar', detalle: String(e.message).slice(0, 400),
+      note: permiso ? 'Google no dio permiso para leer tu calendario. Desconéctalo en Configuración y vuelve a conectarlo aceptando todos los permisos.' : 'No se pudo leer tu Google Calendar.' })
   }
 }
 
@@ -121,6 +141,7 @@ async function create(req, res, session){
     const j = await ejecutarAccion({
       tool: 'GOOGLECALENDAR_CREATE_EVENT',
       connectedAccountId: session.calendarAccountId,
+      entityId: session.email,
       args: {
         calendar_id: 'primary',
         summary: t,
@@ -138,7 +159,7 @@ async function create(req, res, session){
     res.json({ ok: true, id: ev.id || null, enlace: ev.htmlLink || null })
   }catch(e){
     console.error('[calendar/create]', e.message)
-    res.status(502).json({ error: 'no_se_pudo_crear_evento', note: 'No se pudo crear el evento en tu Google Calendar.' })
+    res.status(502).json({ error: 'no_se_pudo_crear_evento', detalle: String(e.message).slice(0, 400), note: 'No se pudo crear el evento en tu Google Calendar.' })
   }
 }
 

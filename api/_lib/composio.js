@@ -91,16 +91,19 @@ export async function ejecutarAccionGmail({ action, params, connectedAccountId, 
 // conectada concreta. Sin normalizar parámetros: se mandan tal cual.
 export async function ejecutarAccion({ tool, args = {}, connectedAccountId, entityId }){
   const payload = { arguments: args }
-  // connected_account_id ya identifica la cuenta sin ambigüedad; user_id
-  // solo se manda si no hay cuenta concreta.
+  // Igual que ejecutarAccionGmail (que ya funciona): cuenta concreta + el
+  // usuario de Composio dueño de esa cuenta (su correo).
   if(connectedAccountId) payload.connected_account_id = connectedAccountId
-  else if(entityId) payload.user_id = entityId
+  if(entityId) payload.user_id = entityId
   const r = await fetch(`${V3}/tools/execute/${tool}`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify(payload)
   })
   const j = await r.json().catch(()=>({}))
-  if(!r.ok || j.successful === false) throw new Error('composio_action_failed: ' + (j.error || j.message || r.status))
+  if(!r.ok || j.successful === false){
+    const msg = typeof j.error === 'string' ? j.error : (j.error?.message || j.message || j.data?.message || JSON.stringify(j).slice(0, 300))
+    throw new Error(`composio ${tool} (${r.status}): ${msg}`)
+  }
   return j
 }

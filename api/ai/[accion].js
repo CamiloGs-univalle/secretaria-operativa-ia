@@ -291,13 +291,13 @@ async function etiquetarGmail(req, res, u){
     .map(i => ({ messageId: recortar(i?.messageId, 100), etiqueta: limpiarEtiqueta(i?.etiqueta) }))
     .filter(i => i.messageId && i.etiqueta)
   if(!items.length) return res.json({ ok: true, aplicadas: 0 })
-  const listar = await ejecutarAccion({ tool: 'GMAIL_LIST_LABELS', connectedAccountId: caId, args: {} })
+  const listar = await ejecutarAccion({ tool: 'GMAIL_LIST_LABELS', connectedAccountId: caId, entityId: u.email, args: {} })
   const d = listar.data?.response_data || listar.data || {}
   const existentes = new Map((d.labels || []).map(l => [l.name, l.id]))
   const idDe = async (nombre) => {
     const full = `Mi Asistente/${nombre}`
     if(existentes.has(full)) return existentes.get(full)
-    const c = await ejecutarAccion({ tool: 'GMAIL_CREATE_LABEL', connectedAccountId: caId, args: { label_name: full } })
+    const c = await ejecutarAccion({ tool: 'GMAIL_CREATE_LABEL', connectedAccountId: caId, entityId: u.email, args: { label_name: full } })
     const cd = c.data?.response_data || c.data || {}
     const id = cd.id || cd.label?.id
     if(id) existentes.set(full, id)
@@ -308,7 +308,7 @@ async function etiquetarGmail(req, res, u){
     try{
       const labelId = await idDe(it.etiqueta)
       if(!labelId) throw new Error('sin_label_id')
-      await ejecutarAccion({ tool: 'GMAIL_ADD_LABEL_TO_EMAIL', connectedAccountId: caId, args: { message_id: it.messageId, add_label_ids: [labelId] } })
+      await ejecutarAccion({ tool: 'GMAIL_ADD_LABEL_TO_EMAIL', connectedAccountId: caId, entityId: u.email, args: { message_id: it.messageId, add_label_ids: [labelId] } })
       aplicadas++
     }catch(e){ fallidas++; console.warn('[ai/etiquetar-gmail]', e.message) }
   }
