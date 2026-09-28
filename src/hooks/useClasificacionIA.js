@@ -9,7 +9,8 @@ import { evaluarReglas } from './useEntrenamientoIA.js'
 // decide si ya se cerró, si le falta algo o a quién le toca, y actualiza la
 // tarea correspondiente (o crea una si hace falta). Solo re-analiza los hilos
 // que cambiaron desde la última vez (caché por cuenta en este navegador).
-const LOTE = 10, MAX_POR_RONDA = 30
+const LOTE = 5, MAX_POR_RONDA = 20
+const ESPERA_TRAS_FALLO = 5 * 60 * 1000 // no reintentar en automático durante 5 min tras un error
 const ESTADO_PROCESO = { CERRADO: 'COMPLETADO', ESPERANDO_OTRO: 'ESPERANDO', PENDIENTE_MI_RESPUESTA: 'PENDIENTE', FALTA_INFO: 'PENDIENTE' }
 const CERRADOS = ['COMPLETADO', 'CERRADO', 'CANCELADO']
 
@@ -20,6 +21,7 @@ export function useClasificacionIA({ session, iaConfigurada, correos, procesos, 
   const [iaPorHilo, setIaPorHilo] = useState({})
   const [clasificando, setClasificando] = useState(false)
   const corriendo = useRef(false)
+  const falloHasta = useRef(0)
   const auto = configuracion?.clasificacionIA !== false
 
   useEffect(() => {
@@ -29,6 +31,7 @@ export function useClasificacionIA({ session, iaConfigurada, correos, procesos, 
 
   const clasificar = useCallback(async ({ forzar = false, silencioso = false } = {}) => {
     if(!iaConfigurada || !session?.real || corriendo.current || !correos.length) return
+    if(silencioso && Date.now() < falloHasta.current) return
     corriendo.current = true; setClasificando(true)
     try{
       let cache = {}
@@ -46,12 +49,15 @@ export function useClasificacionIA({ session, iaConfigurada, correos, procesos, 
       if(!pendientes.length){ if(!silencioso) showToast('✨ Tu bandeja ya está revisada'); return }
 
       const resultados = []
+      let errorLote = null
       for(let i = 0; i < pendientes.length; i += LOTE){
         const lote = pendientes.slice(i, i + LOTE)
-        const r = await clasificarHilosIA(lote.map(h => ({
+        let r
+        try{ r = await clasificarHilosIA(lote.map(h => ({
           hiloId: h.hiloId, asunto: h.msgs[0].asunto,
           mensajes: h.msgs.map(m => ({ de: correoDeRemitente(m.remitente) === miEmail ? `YO (${miEmail})` : m.remitente, para: (m.destinatarios || []).join(', '), fecha: m.fecha, texto: m.cuerpo })),
-        })), fechaLocalISO(), entRef.current)
+        })), fechaLocalISO(), entRef.current) }
+        catch(e){ errorLote = e; if([401, 403, 429].includes(e.status) || !resultados.length) break; continue }
         for(const res of r.hilos || []){
           const h = lote.find(x => x.hiloId === res.hiloId)
           if(!h) continue
@@ -64,6 +70,8 @@ export function useClasificacionIA({ session, iaConfigurada, correos, procesos, 
           resultados.push({ ...res, firma: h.firma, ultimoId: ult.id, msgs: h.msgs })
         }
       }
+
+      if(errorLote && !resultados.length) throw errorLote
 
       // Aplicar a las tareas
       const lista = getProcesos()
@@ -130,9 +138,14 @@ export function useClasificacionIA({ session, iaConfigurada, correos, procesos, 
       if(cuenta.ESPERANDO_OTRO) partes.push(`🔵 ${cuenta.ESPERANDO_OTRO} esperando respuesta de otros`)
       if(cuenta.CERRADO) partes.push(`✅ ${cuenta.CERRADO} ya se cerr${cuenta.CERRADO === 1 ? 'ó' : 'aron'}`)
       if(resultados.length) agregarMensajeAsistente(`Revisé ${resultados.length} conversación${resultados.length === 1 ? '' : 'es'} de tu correo:\n${partes.join('\n') || 'Nada que requiera acción.'}${cuenta.nuevas ? `\nCreé ${cuenta.nuevas} tarea${cuenta.nuevas === 1 ? '' : 's'} nueva${cuenta.nuevas === 1 ? '' : 's'} para lo que no tenía seguimiento.` : ''}\nPregúntame por cualquiera y te digo qué falta.`)
+      if(errorLote) showToast(`⚠️ Revisé ${resultados.length} conversaciones; el resto falló: ${errorLote.message}`)
+      falloHasta.current = 0
     }catch(e){
-      if(!silencioso) showToast('⚠️ Secretaria IA: ' + e.message)
-      console.warn('[clasificacionIA]', e.message)
+      // Un solo aviso y pausa de 5 min para no insistir cada vez que llegan correos.
+      const yaAvisado = Date.now() < falloHasta.current
+      falloHasta.current = Date.now() + ESPERA_TRAS_FALLO
+      if(!silencioso || !yaAvisado) showToast('⚠️ Secretaria IA: ' + e.message)
+      console.warn('[clasificacionIA]', e.message, e.detalle || '')
     }finally{ corriendo.current = false; setClasificando(false) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [iaConfigurada, session?.email, session?.real, correos, clave, configuracion?.etiquetarGmail, gmailConectado])

@@ -34,7 +34,7 @@ import { useAsistenteChat } from './hooks/useAsistenteChat.js'
 import { useGoogleCalendar } from './hooks/useGoogleCalendar.js'
 import { useMemoriaAsistente } from './hooks/useMemoriaAsistente.js'
 import { useClasificacionIA } from './hooks/useClasificacionIA.js'
-import { estadoIA } from './services/aiService.js'
+import { estadoIA, diagnosticoIA } from './services/aiService.js'
 import ChatMensaje from './components/ChatMensaje.jsx'
 import { useEntrenamientoIA } from './hooks/useEntrenamientoIA.js'
 import EntrenamientoPanel from './components/EntrenamientoPanel.jsx'
@@ -918,7 +918,10 @@ export default function App(){
                 <div className="settings-section-title"><Sparkles size={15}/> Tu secretaria IA</div>
                 <div className="settings-row">
                   <div><b>Estado</b><span>{ia.configured ? 'Activa con Gemini — responde lo que sea, recuerda y revisa tu correo' : !session.real ? 'No disponible en modo demostración' : 'Falta GEMINI_API_KEY en el servidor (ver COMPOSIO_SETUP.md §8)'}</span></div>
-                  <Pill color={ia.configured?'green':'gray'}>{ia.configured?'Activa':'Inactiva'}</Pill>
+                  <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                    <Pill color={ia.configured?'green':'gray'}>{ia.configured?'Activa':'Inactiva'}</Pill>
+                    {ia.configured && <button className="btn sm ghost" onClick={async()=>{ showToast('Probando conexión con Gemini…'); try{ const d=await diagnosticoIA(); showToast(d.ok?`✅ Gemini responde (${d.modelo})`:`⚠️ ${d.note}${d.detalle?` — ${d.detalle}`:''}`) }catch(e){ showToast('⚠️ '+e.message) } }}>Probar</button>}
+                  </div>
                 </div>
                 <div className="settings-row">
                   <div><b>Revisar mi correo automáticamente</b><span>Etiqueta cada conversación, detecta si ya se cerró, si falta algo o a quién le toca, y actualiza tus tareas</span></div>

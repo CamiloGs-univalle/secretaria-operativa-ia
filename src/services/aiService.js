@@ -16,11 +16,15 @@ async function pedir(ruta, body){
     body: body ? JSON.stringify(body) : undefined,
   })
   const j = await r.json().catch(() => ({}))
-  if(!r.ok) throw new Error(j.note || j.error || `HTTP ${r.status}`)
+  if(!r.ok){
+    if(j.detalle) console.warn(`[IA] ${ruta} → ${r.status}:`, j.detalle)
+    const e = new Error(j.note || j.error || `HTTP ${r.status}`); e.status = r.status; e.detalle = j.detalle; throw e
+  }
   return j
 }
 
 export const estadoIA = () => pedir('status')
+export const diagnosticoIA = () => pedir('diagnostico')
 export const chatIA = (mensajes, contexto) => pedir('chat', { mensajes, contexto })
 export const clasificarHilosIA = (hilos, hoy, entrenamiento) => pedir('clasificar', { hilos, hoy, entrenamiento })
 export const etiquetarGmailIA = (items) => pedir('etiquetar-gmail', { items })

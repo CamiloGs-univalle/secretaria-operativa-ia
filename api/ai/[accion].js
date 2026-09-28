@@ -81,18 +81,79 @@ async function usuario(req){
 }
 
 // ---------- Gemini ----------
+// Modelos a intentar, en orden: el configurado y luego alternativas por si
+// Google retira o renombra alguno (un 404 de modelo no debe tumbar la app).
+const MODELOS = [...new Set([MODEL, 'gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash', 'gemini-2.5-flash-lite'])]
+let modeloBueno = null // el último que funcionó (se reutiliza mientras viva la función)
+
+class ErrorGemini extends Error{ constructor(status, msg){ super(`gemini_${status}: ${msg}`); this.status = status; this.detalle = msg } }
+
+async function llamar(modelo, body){
+  const ctrl = new AbortController(); const t = setTimeout(() => ctrl.abort(), 45000)
+  try{
+    const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelo}:generateContent`, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+      body: JSON.stringify(body),
+    })
+    const j = await r.json().catch(() => ({}))
+    if(!r.ok) throw new ErrorGemini(r.status, j.error?.message || r.statusText || 'error')
+    const cand = j.candidates?.[0]
+    const texto = cand?.content?.parts?.map(p => p.text || '').join('') || ''
+    if(!texto) throw new ErrorGemini(200, `respuesta vacía (${cand?.finishReason || j.promptFeedback?.blockReason || 'sin motivo'})`)
+    return texto
+  }catch(e){
+    if(e.name === 'AbortError') throw new ErrorGemini(504, 'Gemini tardó demasiado')
+    if(e instanceof ErrorGemini) throw e
+    throw new ErrorGemini(0, e.message)
+  }finally{ clearTimeout(t) }
+}
+
+function parsearJSON(texto){
+  const limpio = texto.trim().replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '')
+  try{ return JSON.parse(limpio) }catch{}
+  const a = limpio.indexOf('{'), b = limpio.lastIndexOf('}')
+  if(a >= 0 && b > a){ try{ return JSON.parse(limpio.slice(a, b + 1)) }catch{} }
+  throw new ErrorGemini(200, 'la respuesta no era JSON válido')
+}
+
 async function gemini({ system, contents, schema, temperature = 0.4 }){
-  const generationConfig = { temperature, responseMimeType: 'application/json', responseSchema: schema }
-  if(/2\.5-flash/.test(MODEL)) generationConfig.thinkingConfig = { thinkingBudget: 0 }
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
-    body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents, generationConfig }),
-  })
-  const j = await r.json().catch(() => ({}))
-  if(!r.ok) throw new Error(`gemini_${r.status}: ${j.error?.message || 'error'}`)
-  const texto = j.candidates?.[0]?.content?.parts?.map(p => p.text || '').join('') || ''
-  try{ return JSON.parse(texto) }catch{ throw new Error('gemini_json_invalido') }
+  const orden = modeloBueno ? [modeloBueno, ...MODELOS.filter(m => m !== modeloBueno)] : MODELOS
+  let ultimo
+  for(const modelo of orden){
+    // 1º con esquema estricto; si el modelo rechaza el esquema o el "thinking", 2º sin ellos.
+    const variantes = [
+      { responseMimeType: 'application/json', responseSchema: schema, ...(/2\.5-flash/.test(modelo) ? { thinkingConfig: { thinkingBudget: 0 } } : {}) },
+      { responseMimeType: 'application/json' },
+    ]
+    for(const extra of variantes){
+      const sys = extra.responseSchema ? system : `${system}\n\nResponde SOLO con un objeto JSON que cumpla este esquema (sin texto adicional):\n${JSON.stringify(schema)}`
+      try{
+        const texto = await llamar(modelo, { systemInstruction: { parts: [{ text: sys }] }, contents, generationConfig: { temperature, maxOutputTokens: 8192, ...extra } })
+        const out = parsearJSON(texto)
+        modeloBueno = modelo
+        return out
+      }catch(e){
+        ultimo = e
+        console.warn(`[ai] ${modelo}${extra.responseSchema ? '' : ' (sin esquema)'} falló:`, e.message)
+        if([401, 403, 429].includes(e.status)) throw e       // key inválida / sin permiso / cuota: no sirve reintentar
+        if(e.status === 404) break                            // modelo no existe: probar el siguiente
+        if(e.status === 400 || e.status === 200) continue     // esquema/JSON: probar variante sin esquema
+        break                                                 // 5xx/timeout: siguiente modelo
+      }
+    }
+  }
+  throw ultimo || new ErrorGemini(0, 'sin modelos disponibles')
+}
+
+// Mensaje entendible para la persona según el tipo de fallo (sin exponer la key).
+function explicarFallo(e){
+  const s = e?.status
+  if(s === 429) return { code: 429, note: 'Se alcanzó el límite gratuito de Gemini por ahora — intenta en un rato.' }
+  if(s === 401 || s === 403 || /API key|permission|PERMISSION_DENIED|API_KEY/i.test(e?.detalle || '')) return { code: 502, note: 'Gemini rechazó la API key: revisa GEMINI_API_KEY en Vercel y que la "Generative Language API" esté habilitada para esa key.' }
+  if(s === 404) return { code: 502, note: 'El modelo de Gemini configurado no está disponible para esta key.' }
+  if(s === 504) return { code: 504, note: 'Gemini tardó demasiado — intenta de nuevo.' }
+  return { code: 502, note: 'La IA no respondió bien esta vez. Intenta de nuevo.' }
 }
 
 const recortar = (s, n) => String(s ?? '').slice(0, n)
@@ -259,6 +320,14 @@ export default async function handler(req, res){
   const configured = !!process.env.GEMINI_API_KEY
   const u = await usuario(req)
   if(accion === 'status') return res.json({ configured, autenticado: !!u, gmail: !!u?.session?.connectedAccountId })
+  if(accion === 'diagnostico'){
+    if(!u) return res.status(401).json({ error: 'no_autenticado' })
+    if(!configured) return res.json({ ok: false, note: 'Falta GEMINI_API_KEY' })
+    try{
+      const out = await gemini({ system: 'Eres un test.', contents: [{ role: 'user', parts: [{ text: 'Responde {"ok":true}' }] }], schema: { type: 'OBJECT', properties: { ok: { type: 'BOOLEAN' } }, required: ['ok'] } })
+      return res.json({ ok: !!out.ok, modelo: modeloBueno })
+    }catch(e){ return res.json({ ok: false, ...explicarFallo(e), detalle: recortar(e.detalle || e.message, 300) }) }
+  }
   if(!u) return res.status(401).json({ error: 'no_autenticado' })
   if(DOMINIO && !u.email.endsWith('@' + DOMINIO)) return res.status(403).json({ error: 'dominio_no_permitido' })
   if(req.method !== 'POST') return res.status(405).json({ error: 'POST only' })
@@ -271,7 +340,10 @@ export default async function handler(req, res){
     res.status(404).json({ error: 'accion_desconocida' })
   }catch(e){
     console.error(`[ai/${accion}]`, e.message)
-    const cuota = /gemini_429/.test(e.message)
-    res.status(cuota ? 429 : 502).json({ error: 'ia_fallo', note: cuota ? 'Se alcanzó el límite gratuito de Gemini por ahora — intenta en un rato.' : 'La IA no respondió bien esta vez. Intenta de nuevo.' })
+    const { code, note } = explicarFallo(e)
+    res.status(code).json({ error: 'ia_fallo', note, detalle: recortar(e.detalle || e.message, 300) })
   }
 }
+
+// Clasificar varios hilos puede tardar más que los 10 s por defecto de Vercel.
+export const config = { maxDuration: 60 }
