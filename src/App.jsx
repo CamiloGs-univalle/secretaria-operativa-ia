@@ -35,6 +35,7 @@ import { useGoogleCalendar } from './hooks/useGoogleCalendar.js'
 import { useMemoriaAsistente } from './hooks/useMemoriaAsistente.js'
 import { useClasificacionIA } from './hooks/useClasificacionIA.js'
 import { estadoIA, diagnosticoIA } from './services/aiService.js'
+import { diagnosticoCalendar } from './services/calendarService.js'
 import ChatMensaje from './components/ChatMensaje.jsx'
 import { useEntrenamientoIA } from './hooks/useEntrenamientoIA.js'
 import EntrenamientoPanel from './components/EntrenamientoPanel.jsx'
@@ -109,6 +110,7 @@ export default function App(){
   const iaPorHiloRef = useRef({})
   const { entrenamiento, actualizar: actualizarEntrenamiento, agregarRegla, quitarRegla, agregarEjemplo, guardado: entrenamientoGuardado } = useEntrenamientoIA(session?.real ? session.email : null)
   const [corrigiendo,setCorrigiendo]=useState(null) // correo que la persona está corrigiendo
+  const [diagCal,setDiagCal]=useState(null) // resultado del diagnóstico de Google Calendar
 
   // Lo que la secretaria puede hacer cuando la persona confirma una acción.
   const buscarProceso = id => { const p = procesos.find(x=>x.id===id); if(!p) throw new Error('No encontré esa tarea'); return p }
@@ -968,10 +970,22 @@ export default function App(){
                     : 'Sin conectar — conéctalo para ver tus reuniones en el Calendario'
                   }</span></div></div>
                   {gcal.connected
-                    ? <div style={{display:'flex',gap:6,alignItems:'center'}}><Pill color="green">Conectado</Pill><button className="btn sm ghost" onClick={desconectarCalendar}>Desconectar</button></div>
+                    ? <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}><Pill color="green">Conectado</Pill><button className="btn sm ghost" onClick={async()=>{ setDiagCal({cargando:true}); try{ setDiagCal(await diagnosticoCalendar()) }catch(e){ setDiagCal({error:e.message}) } }}>Diagnosticar</button><button className="btn sm ghost" onClick={desconectarCalendar}>Desconectar</button></div>
                     : gcal.configured && gcal.gmail ? <button className="btn sm" onClick={conectarCalendar}>Conectar</button>
                     : <Pill color="gray">No disponible</Pill>}
                 </div>
+                {diagCal && (
+                  <div className="diag-box">
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                      <b>{diagCal.cargando ? 'Diagnosticando Google Calendar…' : (diagCal.conclusion || diagCal.error)}</b>
+                      <span style={{display:'flex',gap:4}}>
+                        {!diagCal.cargando && <button className="btn sm" onClick={()=>{ navigator.clipboard?.writeText(JSON.stringify(diagCal,null,2)); showToast('📋 Diagnóstico copiado') }}>Copiar</button>}
+                        <button className="btn sm ghost" onClick={()=>setDiagCal(null)}><X size={12}/></button>
+                      </span>
+                    </div>
+                    {!diagCal.cargando && <pre>{JSON.stringify(diagCal,null,2)}</pre>}
+                  </div>
+                )}
                 <div className="integration-row">
                   <div className="integration-info"><MessageSquare size={18}/><div><b>Slack</b><span>No hay integración con Slack en esta app todavía</span></div></div>
                   <Pill color="gray">No disponible</Pill>

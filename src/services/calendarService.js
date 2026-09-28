@@ -15,6 +15,10 @@ export function estadoCalendar(){
   return pedir('/api/calendar/status')
 }
 
+export function diagnosticoCalendar(){
+  return fetch('/api/calendar/diagnostico', { credentials: 'same-origin', cache: 'no-store' }).then(r => r.json())
+}
+
 export function conectarCalendar(){
   window.location.href = '/api/calendar/connect'
 }

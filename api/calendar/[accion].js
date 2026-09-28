@@ -129,6 +129,44 @@ async function events(req, res, session){
   }
 }
 
+// Diagnóstico paso a paso (Configuración → Google Calendar → Diagnosticar):
+// sesión, estado de la conexión en Composio y una lectura real de prueba.
+// No devuelve tokens ni la API key; los ids se recortan.
+async function diagnostico(req, res, session){
+  const corto = s => s ? String(s).slice(0, 6) + '…' : null
+  const out = { fecha: new Date().toISOString(), configurado: configurado(), sesion: { gmail: !!session?.email, email: session?.email || null, calendarAccountId: corto(session?.calendarAccountId) } }
+  if(!session?.calendarAccountId) return res.json({ ...out, conclusion: 'Esta sesión no tiene Google Calendar conectado (conéctalo en Configuración).' })
+  try{
+    const est = await estadoConexion(session.calendarAccountId)
+    const r = est.raw || {}
+    out.conexion = {
+      httpOk: est.ok, estado: est.status || null,
+      authConfig: corto(r.auth_config?.id || r.auth_config_id), authConfigCoincide: (r.auth_config?.id || r.auth_config_id) ? (r.auth_config?.id || r.auth_config_id) === process.env.COMPOSIO_GCAL_AUTH_CONFIG_ID : null,
+      toolkit: r.toolkit?.slug || r.toolkit || r.appName || null, usuarioComposio: r.user_id || null,
+      scopes: r.data?.scope || r.state?.val?.scope || r.params?.scope || null,
+      error: est.ok ? null : JSON.stringify(r).slice(0, 300),
+    }
+  }catch(e){ out.conexion = { error: e.message } }
+  const tMin = new Date(Date.now() - 30 * 86400000).toISOString(), tMax = new Date(Date.now() + 60 * 86400000).toISOString()
+  out.pruebas = []
+  for(const it of [
+    { tool: 'GOOGLECALENDAR_EVENTS_LIST', args: { calendarId: 'primary', timeMin: tMin, timeMax: tMax, singleEvents: true, orderBy: 'startTime', maxResults: 20 } },
+    { tool: 'GOOGLECALENDAR_FIND_EVENT', args: { calendar_id: 'primary', time_min: tMin, time_max: tMax, single_events: true, max_results: 20 } },
+  ]){
+    try{
+      const j = await ejecutarAccion({ ...it, connectedAccountId: session.calendarAccountId, entityId: session.email })
+      const d = datos(j), items = extraerItems(d)
+      out.pruebas.push({ tool: it.tool, ok: true, clavesRespuesta: Object.keys(j || {}), clavesData: Object.keys(d || {}).slice(0, 15), calendario: d.summary || null, eventos: items.length,
+        ejemplo: items.slice(0, 3).map(e => ({ titulo: e.summary, inicio: e.start?.dateTime || e.start?.date })) })
+    }catch(e){ out.pruebas.push({ tool: it.tool, ok: false, error: String(e.message).slice(0, 400) }) }
+  }
+  const ok = out.pruebas.find(p => p.ok)
+  out.conclusion = !ok ? 'Composio/Google rechazan la lectura: mira "error" en pruebas.'
+    : ok.eventos === 0 ? `La lectura funciona pero el calendario${ok.calendario ? ` "${ok.calendario}"` : ''} no tiene eventos entre hace 30 días y dentro de 60. ¿Es la cuenta de Google correcta?`
+    : `Funciona: ${ok.eventos} evento(s) en el calendario${ok.calendario ? ` "${ok.calendario}"` : ''}.`
+  res.json(out)
+}
+
 async function create(req, res, session){
   const { titulo, descripcion = '', fecha, hora = '09:00', duracionMin = 30, timezone = 'America/Bogota' } = req.body || {}
   const t = String(titulo || '').trim().slice(0, 200)
@@ -172,6 +210,8 @@ export default async function handler(req, res){
   if(accion === 'status' && req.method === 'GET'){
     return res.json({ configured: configurado(), gmail: !!session?.email, connected: !!session?.calendarAccountId })
   }
+
+  if(accion === 'diagnostico' && req.method === 'GET') return diagnostico(req, res, session)
 
   if(!session?.calendarAccountId) return res.status(401).json({ error: 'calendar_no_conectado' })
 

@@ -644,3 +644,6 @@
 .corregir-form{display:flex;flex-direction:column;gap:10px;margin:12px 0}
 .corregir-form label{display:flex;flex-direction:column;gap:4px;font-size:12px;font-weight:700;color:var(--text2)}
 .corregir-form .corregir-check{flex-direction:row;align-items:center;gap:8px;font-weight:600}
+
+.diag-box{font-size:12px;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:6px 0}
+.diag-box pre{max-height:260px;overflow:auto;font-size:11px;margin:8px 0 0;white-space:pre-wrap;word-break:break-all}
