@@ -27,6 +27,14 @@ export default function TaskDetailModal({proceso:p, onClose, onToggleSub, onMarc
         <Pill color="gray">{p.area}</Pill>
       </div>
       {p.descripcion && <p style={{fontSize:13,color:'var(--text2)',lineHeight:1.55,background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,padding:'10px 12px',marginBottom:12}}>{p.descripcion}</p>}
+      {(p.iaResumen || p.iaFalta) && (
+        <div className="modal-ia">
+          <b>✨ Tu secretaria dice</b>
+          {p.iaResumen && <div>{p.iaResumen}</div>}
+          {p.iaFalta && <div><b>Falta:</b> {p.iaFalta}</div>}
+          {p.iaSiguientePaso && <div><b>Siguiente paso:</b> {p.iaSiguientePaso}</div>}
+        </div>
+      )}
       <div style={{fontSize:12,color:'var(--muted)',display:'flex',gap:14,flexWrap:'wrap',marginBottom:12}}>
         <span><Calendar size={12}/> Vence {p.fechaLimite}</span>
         <span><Users size={12}/> {p.responsable}</span>

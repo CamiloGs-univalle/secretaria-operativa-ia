@@ -1,4 +1,4 @@
-﻿import { useState, useEffect, useMemo } from 'react'
+﻿import { useState, useEffect, useMemo, useRef } from 'react'
 import { updateProceso, audit, getAuditLog } from './data/mockFirebase.js'
 import { limpiarDatosDeEjemploFirestore } from './data/mockFirebase.js'
 import LoginScreen from './components/LoginScreen.jsx'
@@ -9,7 +9,7 @@ import {
   CheckSquare, Calendar, CalendarPlus, Users, Settings, Bot, Leaf, CornerUpLeft,
   Clock, ListChecks, Reply, Archive, Check, Send, AlertTriangle,
   MessageSquare, Plus, LayoutGrid, Building2,
-  X, GripVertical, BarChart3, ExternalLink,
+  X, GripVertical, BarChart3, ExternalLink, Trash2, Brain, ScanSearch, Loader2,
 } from 'lucide-react'
 import './App.css'
 import { fechaLocalISO, diasEntre } from './utils/dateUtils.js'
@@ -32,6 +32,10 @@ import { useConfiguracionPersistida } from './hooks/useConfiguracionPersistida.j
 import { useCorreosYProcesos } from './hooks/useCorreosYProcesos.js'
 import { useAsistenteChat } from './hooks/useAsistenteChat.js'
 import { useGoogleCalendar } from './hooks/useGoogleCalendar.js'
+import { useMemoriaAsistente } from './hooks/useMemoriaAsistente.js'
+import { useClasificacionIA } from './hooks/useClasificacionIA.js'
+import { estadoIA } from './services/aiService.js'
+import ChatMensaje from './components/ChatMensaje.jsx'
 
 // Íconos lineales únicos (Lucide, sección 42 de la especificación) para cada
 // pestaña del sidebar — reemplazan los emoji sueltos que usaba cada quien a
@@ -90,10 +94,48 @@ export default function App(){
     abrirResponder, prepararReenvio, verCorreo, enviarRespuesta,
   } = useCorreosYProcesos({ session, showToast, gmailConectado, setGmailConectado, archivados, setArchivados, sel, setSel, tab, setTab, setInboxFiltro, filtro, inboxFiltro, procesos, setProcesos })
 
-  const { chatOpen, setChatOpen, chatInput, setChatInput, chatMessages, setChatMessages, chatEnviando, enviarPreguntaChat } = useAsistenteChat({ procesos, seguimientosFlat, showToast, sel, setSel, setRecordatoriosGenerales })
-
   // Google Calendar real (Composio): estado de conexión + eventos del mes visible.
   const { gcal, gcalEventos, gcalCargando, gcalError, gcalCreando, conectarCalendar, desconectarCalendar, recargarCalendar, enviarTareaACalendar } = useGoogleCalendar({ session, calMes, showToast, refresh })
+
+  // --- Secretaria IA (Gemini): ¿está configurada en el servidor?, memoria
+  // duradera por persona, chat con acciones confirmables y revisión
+  // automática de cada conversación del correo.
+  const [ia,setIa]=useState({ configured:false })
+  useEffect(()=>{ if(!session?.real){ setIa({configured:false}); return } estadoIA().then(setIa).catch(()=>setIa({configured:false})) },[session?.real, session?.email])
+  const { memoria, recordar, olvidar } = useMemoriaAsistente(session?.real ? session.email : null)
+  const iaPorHiloRef = useRef({})
+
+  // Lo que la secretaria puede hacer cuando la persona confirma una acción.
+  const buscarProceso = id => { const p = procesos.find(x=>x.id===id); if(!p) throw new Error('No encontré esa tarea'); return p }
+  const ejecutoresIA = {
+    crear_seguimiento: async a => {
+      const fecha = /^\d{4}-\d{2}-\d{2}$/.test(a.fecha||'') ? a.fecha : fechaLocalISO(new Date(Date.now()+86400000))
+      const p = a.procesoId ? procesos.find(x=>x.id===a.procesoId) : null
+      if(p){ const seguimientos=[...(p.seguimientos||[]), {fecha, nota:a.nota||a.descripcion}]; await updateProceso(p.id,{seguimientos}); refresh(); if(sel?.id===p.id) setSel(s=>s?{...s,seguimientos}:s); return `Seguimiento el ${fecha}` }
+      setRecordatoriosGenerales(r=>[{id:`rec-${Date.now()}`, texto:a.nota||a.descripcion, fecha, creado:new Date().toISOString()}, ...r])
+      return `Recordatorio el ${fecha}`
+    },
+    marcar_listo: async a => { buscarProceso(a.procesoId); marcarProcesoListo(a.procesoId); return 'Marcada como lista' },
+    cambiar_prioridad: async a => { buscarProceso(a.procesoId); await updateProceso(a.procesoId,{prioridad:a.prioridad||'ALTA'}); refresh(); return `Prioridad ${a.prioridad}` },
+    crear_tarea: async a => { const p = crearTareaManual({ titulo:a.titulo||a.descripcion, descripcion:a.nota||'', prioridad:a.prioridad||'MEDIA', area:'Operaciones', fechaLimite:a.fecha, subtareas:[] }); return `Tarea ${p.id} creada` },
+    archivar_correo: async a => { if(!correos.some(c=>c.id===a.correoId)) throw new Error('No encontré ese correo'); archivarCorreo(a.correoId); return 'Archivado' },
+    marcar_leido: async a => { if(!correos.some(c=>c.id===a.correoId)) throw new Error('No encontré ese correo'); marcarLeido(a.correoId); return 'Marcado leído' },
+    redactar_respuesta: async a => {
+      const c = correos.find(x=>x.id===a.correoId); if(!c) throw new Error('No encontré ese correo')
+      abrirResponder(c); if(a.cuerpo) setReply(r=> r?{...r, cuerpo:a.cuerpo}:r)
+      return 'Borrador abierto — revísalo y envíalo tú'
+    },
+    agendar_calendar: async a => {
+      if(!gcal.connected) throw new Error('Primero conecta Google Calendar en Configuración')
+      const r = await enviarTareaACalendar(buscarProceso(a.procesoId), { hora:/^\d{2}:\d{2}$/.test(a.hora||'')?a.hora:'09:00' })
+      if(!r) throw new Error('No se pudo agendar'); return 'Agendado en Google Calendar'
+    },
+  }
+
+  const { chatOpen, setChatOpen, chatInput, setChatInput, chatMessages, setChatMessages, chatEnviando, enviarPreguntaChat, resolverAccion, agregarMensajeAsistente, borrarConversacion } = useAsistenteChat({ session, iaConfigurada: ia.configured, procesos, correos, seguimientosFlat, recordatoriosGenerales, gcalEventos, getIaPorHilo: ()=>iaPorHiloRef.current, memoria, recordar, olvidar, ejecutores: ejecutoresIA, showToast, sel, setSel, setRecordatoriosGenerales })
+
+  const { iaPorHilo, clasificando, clasificarAhora } = useClasificacionIA({ session, iaConfigurada: ia.configured, correos, procesos, refresh, configuracion, gmailConectado, agregarMensajeAsistente, showToast })
+  iaPorHiloRef.current = iaPorHilo
 
   // --- Fila de correo estilo mockup — un solo componente usado tanto en el
   // resumen "Bandeja inteligente" de Inicio como en la pestaña dedicada, así
@@ -114,10 +156,13 @@ export default function App(){
             <span className="mailrow-email">{email}</span>
           </div>
           <div className="mailrow-subject">{correo.asunto}{correo.etiquetas.includes('UNREAD') && <span style={{display:'inline-block',width:7,height:7,background:'var(--accent)',borderRadius:'50%',marginLeft:8,verticalAlign:'middle'}}/>}</div>
-          <div className="mailrow-preview">{correo.cuerpo.slice(0,110)}</div>
+          <div className="mailrow-preview">{iaPorHilo[correo.hiloId]?.resumen || correo.cuerpo.slice(0,110)}</div>
+          {iaPorHilo[correo.hiloId]?.falta && <div className="mailrow-falta">Falta: {iaPorHilo[correo.hiloId].falta}</div>}
         </div>
         <div className="mailrow-right" onClick={e=>e.stopPropagation()}>
-          <Pill color={pr.color}>{pr.label}</Pill>
+          {iaPorHilo[correo.hiloId]?.etiquetas?.length
+            ? <span className="pill-ia" title={iaPorHilo[correo.hiloId].siguientePaso}><Sparkles size={10}/> {iaPorHilo[correo.hiloId].etiquetas[0]}</span>
+            : <Pill color={pr.color}>{pr.label}</Pill>}
           <div className="mailrow-meta">
             <span>{correo.fecha.slice(5,16).replace('T',' ')}</span>
             <span title="Gmail">📧</span>
@@ -839,6 +884,33 @@ export default function App(){
               </div>
 
               <div className="settings-section">
+                <div className="settings-section-title"><Sparkles size={15}/> Tu secretaria IA</div>
+                <div className="settings-row">
+                  <div><b>Estado</b><span>{ia.configured ? 'Activa con Gemini — responde lo que sea, recuerda y revisa tu correo' : !session.real ? 'No disponible en modo demostración' : 'Falta GEMINI_API_KEY en el servidor (ver COMPOSIO_SETUP.md §8)'}</span></div>
+                  <Pill color={ia.configured?'green':'gray'}>{ia.configured?'Activa':'Inactiva'}</Pill>
+                </div>
+                <div className="settings-row">
+                  <div><b>Revisar mi correo automáticamente</b><span>Etiqueta cada conversación, detecta si ya se cerró, si falta algo o a quién le toca, y actualiza tus tareas</span></div>
+                  <Switch checked={configuracion.clasificacionIA!==false} onChange={v=>setConfiguracion(c=>({...c,clasificacionIA:v}))}/>
+                </div>
+                <div className="settings-row">
+                  <div><b>Poner las etiquetas también en Gmail</b><span>Crea etiquetas "Mi Asistente/…" en tu Gmail real{!gmailConectado?' (requiere Gmail conectado)':''}</span></div>
+                  <Switch checked={!!configuracion.etiquetarGmail} onChange={v=>setConfiguracion(c=>({...c,etiquetarGmail:v}))}/>
+                </div>
+                <div className="settings-row" style={{flexDirection:'column',alignItems:'stretch',gap:8}}>
+                  <div><b><Brain size={13}/> Lo que tu secretaria recuerda de ti</b><span>Se lo dices en el chat ("recuerda que Juan es el de compras") y lo usa en cada conversación</span></div>
+                  {!memoria.length && <span style={{fontSize:12,color:'var(--muted)'}}>Todavía no recuerda nada.</span>}
+                  {memoria.map((m,i)=>(
+                    <div key={i} className="memoria-row"><span>{m.texto}</span><small>{m.fecha}</small><button className="btn sm ghost" aria-label="Olvidar" onClick={()=>olvidar(m.texto)}><X size={12}/></button></div>
+                  ))}
+                  <form style={{display:'flex',gap:6}} onSubmit={e=>{e.preventDefault(); const v=e.target.elements.nuevo.value.trim(); if(v){ recordar(v); e.target.reset() }}}>
+                    <input name="nuevo" className="input" placeholder="Agregar algo que deba recordar…"/>
+                    <button className="btn sm" type="submit"><Plus size={13}/></button>
+                  </form>
+                </div>
+              </div>
+
+              <div className="settings-section">
                 <div className="settings-section-title"><RefreshCw size={15}/> Integraciones</div>
                 <div className="integration-row">
                   <div className="integration-info"><Mail size={18}/><div><b>Gmail</b><span>{gmailConectado?`Conectado — ${session.email}`:session.firebase?'Sesión Google activa, Gmail sin conectar':'Modo demostración'}</span></div></div>
@@ -930,22 +1002,23 @@ export default function App(){
             <div className="asis-card asis-verde">
               <div className="asis-head">
                 <div className="asis-avatar"><Bot size={20}/></div>
-                <div><b>Asistente personal</b><small>Siempre pendiente de lo importante</small></div>
+                <div style={{flex:1}}><b>Asistente personal {ia.configured && <span className="asis-ia-badge"><Sparkles size={9}/> IA</span>}</b><small>{clasificando ? 'Revisando tu correo…' : ia.configured ? 'Tu secretaria — recuerda y hace seguimiento' : 'Siempre pendiente de lo importante'}</small></div>
+                {chatMessages.length>1 && <button className="asis-clear" title="Borrar conversación" onClick={borrarConversacion}><Trash2 size={13}/></button>}
               </div>
-              <div style={{maxHeight:220,overflowY:'auto',marginBottom:4}}>
-                {chatMessages.map((m,i)=>(
-                  <div key={i} className={`chat-msg chat-${m.de}`}>{m.texto.split('\n').map((l,j)=><div key={j}>{l}</div>)}</div>
-                ))}
-                {chatEnviando && <div className="chat-msg chat-asistente">…</div>}
+              <div className="chat-scroll" ref={el=>{ if(el) el.scrollTop = el.scrollHeight }}>
+                {chatMessages.map((m,i)=>(<ChatMensaje key={i} m={m} onAccion={(j,ok)=>resolverAccion(i,j,ok)}/>))}
+                {chatEnviando && <div className="chat-msg chat-asistente chat-pensando"><span/><span/><span/></div>}
               </div>
               <div className="asis-quick-grid">
-                <button className="asis-quick-btn" onClick={()=>enviarPreguntaChat('¿qué tengo pendiente?')}><ListChecks size={14}/> Ver resumen</button>
+                <button className="asis-quick-btn" onClick={()=>enviarPreguntaChat(ia.configured ? '¿Qué tengo pendiente hoy? Dime qué me toca a mí, qué estoy esperando de otros y qué le falta a cada cosa para cerrarse.' : '¿qué tengo pendiente?')}><ListChecks size={14}/> Ver resumen</button>
                 <button className="asis-quick-btn" onClick={()=>{setTab('inbox'); setInboxFiltro(f=>({...f,tab:'ACCION'}))}}><CheckSquare size={14}/> Revisar pendientes</button>
-                <button className="asis-quick-btn" onClick={()=>setTab('seguimientos')}><RefreshCw size={14}/> Crear seguimiento</button>
+                {ia.configured
+                  ? <button className="asis-quick-btn" disabled={clasificando} onClick={clasificarAhora}>{clasificando?<Loader2 size={14} className="spin"/>:<ScanSearch size={14}/>} {clasificando?'Revisando…':'Revisar mi correo'}</button>
+                  : <button className="asis-quick-btn" onClick={()=>setTab('seguimientos')}><RefreshCw size={14}/> Crear seguimiento</button>}
                 <button className="asis-quick-btn" onClick={()=>setTab('calendario')}><CalendarPlus size={14}/> Programar en calendario</button>
               </div>
               <form className="asis-input-row" onSubmit={e=>{e.preventDefault(); enviarPreguntaChat()}}>
-                <input className="input" value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder="Pregúntame algo…"/>
+                <input className="input" value={chatInput} onChange={e=>setChatInput(e.target.value)} placeholder={ia.configured ? 'Pídeme lo que sea…' : 'Pregúntame algo…'}/>
                 <button className="btn primary sm" type="submit" disabled={!chatInput.trim()||chatEnviando}><Send size={14}/></button>
               </form>
             </div>

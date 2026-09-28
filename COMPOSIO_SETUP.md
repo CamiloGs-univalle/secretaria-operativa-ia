@@ -121,3 +121,33 @@ Calendar se guarda en la misma cookie cifrada).
   evento (30 min) en la fecha límite; el id queda en `gcalEventId`.
 
 Acciones de Composio: `GOOGLECALENDAR_EVENTS_LIST`, `GOOGLECALENDAR_CREATE_EVENT`.
+
+## 8. Secretaria IA (Gemini)
+
+Código: `api/ai/[accion].js` (una función: status, chat, clasificar,
+etiquetar-gmail), `src/services/aiService.js`, `src/engine/contextoIA.js`,
+`src/hooks/useAsistenteChat.js`, `src/hooks/useClasificacionIA.js`,
+`src/hooks/useMemoriaAsistente.js`, `src/components/ChatMensaje.jsx`.
+
+### Configurar
+1. Crea una API key en https://aistudio.google.com/apikey (capa gratuita).
+2. Vercel → Environment Variables → `GEMINI_API_KEY` = esa key. Opcional:
+   `GEMINI_MODEL` (por defecto `gemini-2.5-flash`), `ALLOWED_EMAIL_DOMAIN`
+   (por defecto `proservis.com.co`; solo esas cuentas pueden usar la IA).
+3. Redeploy de un commit que incluya este código.
+
+### Qué hace
+- Chat: responde cualquier pregunta con los datos reales (tareas, correos,
+  seguimientos, Google Calendar) y propone acciones que la persona confirma
+  con un botón (crear seguimiento, marcar lista, cambiar prioridad, crear
+  tarea, archivar, marcar leído, redactar respuesta, agendar en Calendar).
+  Nunca envía correos sola: "redactar" abre el borrador para revisarlo.
+- Memoria: lo que la persona le cuenta queda en Firestore `usuarios/{uid}`
+  (+ copia en el navegador). Se ve y se borra en Configuración.
+- Revisión automática del correo: cada hilo nuevo o con cambios se etiqueta
+  y se decide si está CERRADO, ESPERANDO_OTRO, PENDIENTE_MI_RESPUESTA o
+  FALTA_INFO; la tarea se actualiza (estado, prioridad, qué falta, siguiente
+  paso) o se crea si no existía. Opcional: etiquetas "Mi Asistente/…" en Gmail.
+- El texto de los correos se trata como datos, no como instrucciones.
+
+Límite de Vercel Hobby: con esta función el proyecto usa 12/12 funciones.
