@@ -1,6 +1,5 @@
 ﻿import { useState, useEffect, useMemo, useRef } from 'react'
-import { updateProceso, audit, getAuditLog } from './data/mockFirebase.js'
-import { limpiarDatosDeEjemploFirestore } from './data/mockFirebase.js'
+import { updateProceso, audit } from './data/mockFirebase.js'
 import LoginScreen from './components/LoginScreen.jsx'
 import { Donut, HBarList, TrendBars } from './components/Charts.jsx'
 import { iniciales } from './services/authService.js'
@@ -35,10 +34,9 @@ import { useGoogleCalendar } from './hooks/useGoogleCalendar.js'
 import { useMemoriaAsistente } from './hooks/useMemoriaAsistente.js'
 import { useClasificacionIA } from './hooks/useClasificacionIA.js'
 import { estadoIA, diagnosticoIA } from './services/aiService.js'
-import { diagnosticoCalendar } from './services/calendarService.js'
 import ChatMensaje from './components/ChatMensaje.jsx'
 import { useEntrenamientoIA } from './hooks/useEntrenamientoIA.js'
-import EntrenamientoPanel from './components/EntrenamientoPanel.jsx'
+import ConfiguracionView from './components/config/ConfiguracionView.jsx'
 import CorregirModal from './components/CorregirModal.jsx'
 
 // Íconos lineales únicos (Lucide, sección 42 de la especificación) para cada
@@ -110,7 +108,6 @@ export default function App(){
   const iaPorHiloRef = useRef({})
   const { entrenamiento, actualizar: actualizarEntrenamiento, agregarRegla, quitarRegla, agregarEjemplo, guardado: entrenamientoGuardado } = useEntrenamientoIA(session?.real ? session.email : null)
   const [corrigiendo,setCorrigiendo]=useState(null) // correo que la persona está corrigiendo
-  const [diagCal,setDiagCal]=useState(null) // resultado del diagnóstico de Google Calendar
 
   // Lo que la secretaria puede hacer cuando la persona confirma una acción.
   const buscarProceso = id => { const p = procesos.find(x=>x.id===id); if(!p) throw new Error('No encontré esa tarea'); return p }
@@ -873,176 +870,18 @@ export default function App(){
 
 
           {tab==='configuracion' && (
-            <div className="settings-wrap">
-              <p style={{fontSize:12,color:'var(--muted)',margin:'0 0 4px'}}>Tu asistente, a tu manera — estos ajustes se guardan en este navegador para tu cuenta ({session.email}).</p>
-
-              <div className="settings-section">
-                <div className="settings-section-title"><Settings size={15}/> Preferencias del asistente</div>
-                <div className="settings-row">
-                  <div><b>Modo oscuro</b><span>Cambia el tema de toda la app</span></div>
-                  <Switch checked={theme==='dark'} onChange={v=>setTheme(v?'dark':'light')}/>
-                </div>
-                <div className="settings-row" style={{flexDirection:'column',alignItems:'stretch',gap:8}}>
-                  <div style={{display:'flex',justifyContent:'space-between',width:'100%'}}><b>Nivel de intervención</b></div>
-                  <div className="view-toggle" style={{width:'fit-content'}}>
-                    {[{k:'minimo',l:'Mínimo'},{k:'normal',l:'Normal'},{k:'proactivo',l:'Proactivo'}].map(o=>(
-                      <button key={o.k} className={configuracion.intervencion===o.k?'active':''} onClick={()=>setConfiguracion(c=>({...c,intervencion:o.k}))}>{o.l}</button>
-                    ))}
-                  </div>
-                  <span style={{fontSize:11,color:'var(--muted)'}}>{configuracion.intervencion==='minimo'?'Solo avisa lo urgente.':configuracion.intervencion==='proactivo'?'Recuerda seguido y sugiere respuestas.':'Avisa y sugiere sin ser insistente.'}</span>
-                </div>
-                <div className="settings-row">
-                  <div><b>Horario activo</b><span>Cuándo el asistente te avisa cosas</span></div>
-                  <div style={{display:'flex',gap:8}}>
-                    <input className="input" style={{width:110}} type="time" value={configuracion.horarioInicio} onChange={e=>setConfiguracion(c=>({...c,horarioInicio:e.target.value}))}/>
-                    <input className="input" style={{width:110}} type="time" value={configuracion.horarioFin} onChange={e=>setConfiguracion(c=>({...c,horarioFin:e.target.value}))}/>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div><b>Avisos de vencimiento y seguimiento</b><span>Activa/desactiva los avisos "vence pronto" y "sin respuesta"</span></div>
-                  <Switch checked={configuracion.avisosActivos} onChange={v=>setConfiguracion(c=>({...c,avisosActivos:v}))}/>
-                </div>
-                <div className="settings-row">
-                  <div><b>Avisar "vence pronto" con anticipación</b><span>Días antes de la fecha límite</span></div>
-                  <input className="input" style={{width:80}} type="number" min={1} max={7} disabled={!configuracion.avisosActivos} value={configuracion.avisoDiasVencePronto} onChange={e=>setConfiguracion(c=>({...c,avisoDiasVencePronto:Number(e.target.value)||1}))}/>
-                </div>
-                <div className="settings-row">
-                  <div><b>Avisar "sin respuesta" tras</b><span>Días esperando respuesta de la otra persona</span></div>
-                  <input className="input" style={{width:80}} type="number" min={1} max={14} disabled={!configuracion.avisosActivos} value={configuracion.avisoDiasSeguimiento} onChange={e=>setConfiguracion(c=>({...c,avisoDiasSeguimiento:Number(e.target.value)||1}))}/>
-                </div>
-                <div style={{fontSize:12,color:'var(--muted)',display:'flex',alignItems:'center',gap:10,background:'var(--bg2)',padding:'10px 12px',borderRadius:10,marginTop:4}}>
-                  <b style={{color:'var(--text)'}}>Confianza de la IA: {confianzaProm==null?'—':`${confianzaProm}%`}</b>
-                  <span>95-100 automático • 80-94 revisión • &lt;60 no actuar sin revisar</span>
-                </div>
-              </div>
-
-              <div className="settings-section">
-                <div className="settings-section-title"><Sparkles size={15}/> Tu secretaria IA</div>
-                <div className="settings-row">
-                  <div><b>Estado</b><span>{ia.configured ? 'Activa con Gemini — responde lo que sea, recuerda y revisa tu correo' : !session.real ? 'No disponible en modo demostración' : 'Falta GEMINI_API_KEY en el servidor (ver COMPOSIO_SETUP.md §8)'}</span></div>
-                  <div style={{display:'flex',gap:6,alignItems:'center'}}>
-                    <Pill color={ia.configured?'green':'gray'}>{ia.configured?'Activa':'Inactiva'}</Pill>
-                    {ia.configured && <button className="btn sm ghost" onClick={async()=>{ showToast('Probando conexión con Gemini…'); try{ const d=await diagnosticoIA(); showToast(d.ok?`✅ Gemini responde (${d.modelo})`:`⚠️ ${d.note}${d.detalle?` — ${d.detalle}`:''}`) }catch(e){ showToast('⚠️ '+e.message) } }}>Probar</button>}
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div><b>Revisar mi correo automáticamente</b><span>Etiqueta cada conversación, detecta si ya se cerró, si falta algo o a quién le toca, y actualiza tus tareas</span></div>
-                  <Switch checked={configuracion.clasificacionIA!==false} onChange={v=>setConfiguracion(c=>({...c,clasificacionIA:v}))}/>
-                </div>
-                <div className="settings-row">
-                  <div><b>Poner las etiquetas también en Gmail</b><span>Crea etiquetas "Mi Asistente/…" en tu Gmail real{!gmailConectado?' (requiere Gmail conectado)':''}</span></div>
-                  <Switch checked={!!configuracion.etiquetarGmail} onChange={v=>setConfiguracion(c=>({...c,etiquetarGmail:v}))}/>
-                </div>
-                <div className="settings-row" style={{flexDirection:'column',alignItems:'stretch',gap:8}}>
-                  <div><b><Brain size={13}/> Lo que tu secretaria recuerda de ti</b><span>Se lo dices en el chat ("recuerda que Juan es el de compras") y lo usa en cada conversación</span></div>
-                  {!memoria.length && <span style={{fontSize:12,color:'var(--muted)'}}>Todavía no recuerda nada.</span>}
-                  {memoria.map((m,i)=>(
-                    <div key={i} className="memoria-row"><span>{m.texto}</span><small>{m.fecha}</small><button className="btn sm ghost" aria-label="Olvidar" onClick={()=>olvidar(m.texto)}><X size={12}/></button></div>
-                  ))}
-                  <form style={{display:'flex',gap:6}} onSubmit={e=>{e.preventDefault(); const v=e.target.elements.nuevo.value.trim(); if(v){ recordar(v); e.target.reset() }}}>
-                    <input name="nuevo" className="input" placeholder="Agregar algo que deba recordar…"/>
-                    <button className="btn sm" type="submit"><Plus size={13}/></button>
-                  </form>
-                </div>
-              </div>
-
-              {session.real && (
-                <EntrenamientoPanel
-                  entrenamiento={entrenamiento} actualizar={actualizarEntrenamiento}
-                  agregarRegla={agregarRegla} quitarRegla={quitarRegla} guardado={entrenamientoGuardado}
-                  iaActiva={ia.configured} reanalizando={clasificando} onReanalizar={reanalizarTodo}
-                  onProbar={()=>{ setTab('dashboard'); enviarPreguntaChat('Explícame en pocas líneas qué entendiste de mi entrenamiento: quién soy, qué es importante para mí, mis reglas y mis etiquetas. ¿Te falta algo por saber para ayudarme mejor?') }}
-                />
-              )}
-
-              <div className="settings-section">
-                <div className="settings-section-title"><RefreshCw size={15}/> Integraciones</div>
-                <div className="integration-row">
-                  <div className="integration-info"><Mail size={18}/><div><b>Gmail</b><span>{gmailConectado?`Conectado — ${session.email}`:session.firebase?'Sesión Google activa, Gmail sin conectar':'Modo demostración'}</span></div></div>
-                  {gmailConectado ? <Pill color="green">Conectado</Pill> : session.firebase ? <button className="btn sm" onClick={()=>handleRealConnect({name:session.nombre, email:session.email})}>Conectar</button> : <Pill color="gray">Demo</Pill>}
-                </div>
-                <div className="integration-row">
-                  <div className="integration-info"><Calendar size={18}/><div><b>Google Calendar</b><span>{
-                    gcal.connected ? 'Conectado — tus reuniones aparecen en Calendario y puedes enviar vencimientos de tareas'
-                    : !session.real ? 'No disponible en modo demostración'
-                    : !gcal.configured ? 'Falta configurarlo en el servidor (COMPOSIO_GCAL_AUTH_CONFIG_ID)'
-                    : !gcal.gmail ? 'Conecta primero tu Gmail real'
-                    : 'Sin conectar — conéctalo para ver tus reuniones en el Calendario'
-                  }</span></div></div>
-                  {gcal.connected
-                    ? <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}><Pill color="green">Conectado</Pill><button className="btn sm ghost" onClick={async()=>{ setDiagCal({cargando:true}); try{ setDiagCal(await diagnosticoCalendar()) }catch(e){ setDiagCal({error:e.message}) } }}>Diagnosticar</button><button className="btn sm ghost" onClick={desconectarCalendar}>Desconectar</button></div>
-                    : gcal.configured && gcal.gmail ? <button className="btn sm" onClick={conectarCalendar}>Conectar</button>
-                    : <Pill color="gray">No disponible</Pill>}
-                </div>
-                {diagCal && (
-                  <div className="diag-box">
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
-                      <b>{diagCal.cargando ? 'Diagnosticando Google Calendar…' : (diagCal.conclusion || diagCal.error)}</b>
-                      <span style={{display:'flex',gap:4}}>
-                        {!diagCal.cargando && <button className="btn sm" onClick={()=>{ navigator.clipboard?.writeText(JSON.stringify(diagCal,null,2)); showToast('📋 Diagnóstico copiado') }}>Copiar</button>}
-                        <button className="btn sm ghost" onClick={()=>setDiagCal(null)}><X size={12}/></button>
-                      </span>
-                    </div>
-                    {!diagCal.cargando && <pre>{JSON.stringify(diagCal,null,2)}</pre>}
-                  </div>
-                )}
-                <div className="integration-row">
-                  <div className="integration-info"><MessageSquare size={18}/><div><b>Slack</b><span>No hay integración con Slack en esta app todavía</span></div></div>
-                  <Pill color="gray">No disponible</Pill>
-                </div>
-                <div style={{fontSize:11,color:'var(--muted)',marginTop:2}}>Ninguna integración se muestra "Conectada" sin estarlo de verdad — es una decisión a propósito de esta app.</div>
-              </div>
-
-              <div className="settings-section">
-                <div className="settings-section-title"><Archive size={15}/> Datos y privacidad</div>
-                <div className="settings-row">
-                  <div><b>Exportar tus tareas</b><span>Descarga todas tus tareas reales en Excel</span></div>
-                  <button className="btn sm ghost" onClick={()=>exportarCSV(procesos)}>⬇️ Descargar</button>
-                </div>
-                {session.firebase && (
-                  <div className="settings-row">
-                    <div><b>Limpiar datos de ejemplo</b><span>Borra los procesos de ejemplo si quedaron en Firestore</span></div>
-                    <button className="btn sm ghost" onClick={async()=>{
-                      const r = await limpiarDatosDeEjemploFirestore()
-                      if(r.ok) showToast(`🧹 Datos de ejemplo eliminados de Firestore (${r.borrados})`)
-                      else showToast('⚠️ '+(r.razon||'No se pudo limpiar'))
-                    }}>🧹 Limpiar</button>
-                  </div>
-                )}
-                <div className="settings-row">
-                  <div><b>Cada persona ve solo lo suyo</b><span>Tus procesos están aislados por cuenta ({session.email}), a nivel de base de datos</span></div>
-                  <Pill color="green">Activo</Pill>
-                </div>
-              </div>
-
-              <div className="settings-section">
-                <div className="settings-section-title"><ListChecks size={15}/> Historial — todo lo que se ha hecho</div>
-                <div style={{fontSize:11,color:'var(--muted)',margin:'-4px 0 4px'}}>Nada se envía ni se cierra sin que quede aquí</div>
-                <div style={{display:'grid',gap:8}}>
-                  {(()=>{
-                    const log = getAuditLog()
-                    const etiqueta = {
-                      sync_gmail:'🔄 Sincronizó Gmail',
-                      enviar_respuesta:'✉️ Envió una respuesta',
-                      reenvio:'↪️ Preparó un reenvío',
-                      reply_ready:'✅ Marcó un proceso listo para responder',
-                      proceso_listo:'✅ Marcó un proceso como listo',
-                      exportar_csv:'⬇️ Descargó tareas en Excel',
-                      sheets_sync:'↗️ Sincronizó a Google Sheets',
-                    }
-                    if(!log.length) return <div className="empty-state">Aún no hay acciones registradas. Aparecerán aquí en cuanto sincronice Gmail o responda un correo.</div>
-                    return log.slice(0,15).map((r,i)=>(
-                      <div key={i} style={{display:'flex',gap:12,fontSize:12,border:'1px solid var(--border)',borderRadius:8,padding:12,alignItems:'center',background:'var(--bg2)',flexWrap:'wrap'}}>
-                        <span className="mono" style={{color:'var(--muted)',minWidth:140}}>{new Date(r.fecha).toLocaleString()}</span>
-                        <span style={{minWidth:110,fontWeight:700}}>{r.usuario}</span>
-                        <span style={{flex:1,minWidth:160}}>{etiqueta[r.accion]||r.accion}{r.to?` — a ${String(r.to).split('<')[0].trim()}`:''}{r.subject?`: "${r.subject.slice(0,60)}"`:''}{r.account?` (${r.account})`:''}{r.id?` — ${r.id}`:''}{r.proceso?` • ${r.proceso}`:''}{r.destinatario?` → ${r.destinatario}`:''}{r.texto?` “${r.texto.slice(0,40)}”`:''}</span>
-                        <Pill color="blue">Registrado</Pill>
-                      </div>
-                    ))
-                  })()}
-                </div>
-              </div>
-            </div>
+            <ConfiguracionView
+              session={session} theme={theme} setTheme={setTheme}
+              configuracion={configuracion} setConfiguracion={setConfiguracion} confianzaProm={confianzaProm}
+              ia={ia} probarIA={async()=>{ showToast('Probando conexión con Gemini…'); try{ const d=await diagnosticoIA(); showToast(d.ok?`✅ Gemini responde (${d.modelo})`:`⚠️ ${d.note}${d.detalle?` — ${d.detalle}`:''}`) }catch(e){ showToast('⚠️ '+e.message) } }}
+              memoria={memoria} recordar={recordar} olvidar={olvidar}
+              entrenamiento={entrenamiento} actualizarEntrenamiento={actualizarEntrenamiento} agregarRegla={agregarRegla} quitarRegla={quitarRegla} entrenamientoGuardado={entrenamientoGuardado}
+              clasificando={clasificando} reanalizarTodo={reanalizarTodo}
+              onProbar={()=>{ setTab('dashboard'); enviarPreguntaChat('Explícame en pocas líneas qué entendiste de mi entrenamiento: quién soy, qué es importante para mí, mis reglas y mis etiquetas. ¿Te falta algo por saber para ayudarme mejor?') }}
+              gmailConectado={gmailConectado} handleRealConnect={handleRealConnect}
+              gcal={gcal} conectarCalendar={conectarCalendar} desconectarCalendar={desconectarCalendar}
+              exportarCSV={exportarCSV} procesos={procesos} showToast={showToast}
+            />
           )}
         </main>
 
