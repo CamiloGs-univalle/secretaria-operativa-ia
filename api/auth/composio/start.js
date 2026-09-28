@@ -2,15 +2,9 @@
 // Inicia la conexión real de Gmail de esa persona vía Composio y la manda
 // a la pantalla de consentimiento hospedada por Composio.
 import { crearEnlaceConexion } from '../../_lib/composio.js'
-import { setCookie, getAppUrl, COOKIE } from '../../_lib/session.js'
+import { setCookie, getAppUrl, encrypt, COOKIE } from '../../_lib/session.js'
 import crypto from 'crypto'
 import { defaultRateLimiter } from '../../_lib/rateLimiter.js'
-
-// Genera un nonce criptográfico seguro para el estado OAuth (state)
-// Previene CSRF en el flujo de Composio
-function generarStateNonce(){
-  return crypto.randomBytes(16).toString('hex')
-}
 
 export default async function handler(req, res){
   if(!process.env.COMPOSIO_API_KEY || !process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID){
@@ -33,19 +27,17 @@ export default async function handler(req, res){
   const name = (req.query?.name || '').trim()
   if(!/^\S+@\S+\.\S+$/.test(email)){ res.status(400).send('Correo inválido'); return }
   try{
-    const appUrl = getAppUrl(req)
-    const stateNonce = crypto.randomBytes(16).toString('hex')
-    const { redirectUrl } = await crearEnlaceConexion({
+    const { redirectUrl, connectedAccountId } = await crearEnlaceConexion({
       userId: email,
       callbackUrl: `${getAppUrl(req)}/api/auth/composio/callback`,
-      state: stateNonce
     })
-    // Guardamos quién está intentando conectar + el nonce, para validar en callback
-    setCookie(res, COOKIE.STATE, JSON.stringify({ email, name, stateNonce }), { maxAge: 600 })
-    // Agregamos el state a la URL de redirección (Composio lo devuelve en el callback)
-    const url = new URL(redirectUrl)
-    url.searchParams.set('state', stateNonce)
-    res.writeHead(302, { Location: url.toString() })
+    // Estado CIFRADO (no JSON plano): quién inicia, qué cuenta creó Composio
+    // y un nonce. El callback exige que el connected_account_id que vuelve en
+    // la URL sea exactamente este — así nadie puede colar el id de una cuenta
+    // ajena. No se toca la URL de Composio (su OAuth usa su propio `state`).
+    const state = { email, name, caId: connectedAccountId || null, nonce: crypto.randomBytes(16).toString('hex'), exp: Date.now() + 10 * 60 * 1000 }
+    setCookie(res, COOKIE.STATE, encrypt(state), { maxAge: 600 })
+    res.writeHead(302, { Location: redirectUrl })
     res.end()
   }catch(e){
     console.error('[auth/composio/start]', e)

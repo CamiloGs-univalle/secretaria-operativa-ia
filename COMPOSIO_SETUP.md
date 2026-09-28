@@ -97,3 +97,27 @@ primero la conexión real de la persona (si existe), y si falla por
 cualquier razón, **sigue exactamente con el comportamiento de siempre**
 (la cuenta fija por `GOOGLE_REFRESH_TOKEN`, o el snapshot local). Por eso es
 seguro desplegar este cambio incluso antes de terminar este setup.
+
+## 7. Google Calendar (ver reuniones y crear eventos)
+
+Código: `api/calendar/[accion].js` (una sola función de Vercel),
+`src/services/calendarService.js`, `src/hooks/useGoogleCalendar.js`.
+Requiere que la persona ya tenga su Gmail conectado (el id de la cuenta de
+Calendar se guarda en la misma cookie cifrada).
+
+### Configurar (una sola vez)
+1. Composio → **Toolkits → Google Calendar → Agregar al proyecto** (OAuth2),
+   scope `https://www.googleapis.com/auth/calendar.events`. Copia el
+   `auth_config_id` (empieza por `ac_`, con el botón de copiar).
+2. Vercel → Environment Variables → `COMPOSIO_GCAL_AUTH_CONFIG_ID` = ese id.
+   En local: también en `.env.local` y usar `npx vercel dev`.
+3. Redeploy **de un commit que incluya este código**.
+4. En la app: Configuración → Google Calendar → **Conectar** (no desde el
+   botón "Conectar cuenta" del panel de Composio).
+
+### Uso
+- Calendario: eventos reales en morado junto a vencimientos/seguimientos.
+- Detalle de tarea o día del Calendario: **Agregar a Google Calendar** crea un
+  evento (30 min) en la fecha límite; el id queda en `gcalEventId`.
+
+Acciones de Composio: `GOOGLECALENDAR_EVENTS_LIST`, `GOOGLECALENDAR_CREATE_EVENT`.

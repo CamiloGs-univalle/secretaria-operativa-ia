@@ -1,4 +1,5 @@
-import { Calendar, Users, X, Check, ExternalLink, Trash2 } from 'lucide-react'
+import { useState } from 'react'
+import { Calendar, CalendarPlus, Users, X, Check, ExternalLink, Trash2 } from 'lucide-react'
 import Pill from './ui/Pill.jsx'
 import EstadoBadge from './ui/EstadoBadge.jsx'
 import { estadoVisualProceso } from '../utils/estadoUtils.js'
@@ -7,8 +8,10 @@ import { estadoVisualProceso } from '../utils/estadoUtils.js'
 // subtareas (las mismas `tareas` reales del proceso, no una copia), y un
 // enlace a la ficha completa (historial, incidencias, correos asociados)
 // que ya existe en la vista de Tabla, para no duplicar esa lógica.
-export default function TaskDetailModal({proceso:p, onClose, onToggleSub, onMarcarListo, onEliminar, onVerDetalleCompleto}){
+export default function TaskDetailModal({proceso:p, onClose, onToggleSub, onMarcarListo, onEliminar, onVerDetalleCompleto, calendarConectado=false, enviandoCalendar=false, onEnviarCalendar}){
   const v = estadoVisualProceso(p)
+  const [hora,setHora]=useState('09:00')
+  const abierta = !['COMPLETADO','CERRADO','CANCELADO'].includes(p.estado)
   return (
     <div className="modal-card task-modal" onClick={e=>e.stopPropagation()}>
       <div className="modal-head">
@@ -38,6 +41,21 @@ export default function TaskDetailModal({proceso:p, onClose, onToggleSub, onMarc
           </label>
         ))}
       </div>
+      {calendarConectado && p.fechaLimite && (
+        <div className="modal-calendar">
+          {p.gcalEventId ? (
+            <span style={{display:'flex',alignItems:'center',gap:6}}><CalendarPlus size={13}/> Ya está en tu Google Calendar
+              {p.gcalEnlace && <a href={p.gcalEnlace} target="_blank" rel="noopener noreferrer" style={{display:'inline-flex',alignItems:'center',gap:3}}>abrir <ExternalLink size={11}/></a>}
+            </span>
+          ) : abierta && (
+            <>
+              <span>Recordatorio el {p.fechaLimite} a las</span>
+              <input className="input" type="time" style={{width:100,padding:'4px 8px'}} value={hora} onChange={e=>setHora(e.target.value)}/>
+              <button className="btn sm" disabled={enviandoCalendar || !hora} onClick={()=>onEnviarCalendar?.(hora)}><CalendarPlus size={13}/> {enviandoCalendar?'Enviando…':'Agregar a Google Calendar'}</button>
+            </>
+          )}
+        </div>
+      )}
       <div className="modal-actions">
         {!['COMPLETADO','CERRADO','CANCELADO'].includes(p.estado) && <button className="btn sm primary" onClick={onMarcarListo}><Check size={13}/> Marcar como completada</button>}
         <button className="btn sm ghost" onClick={onVerDetalleCompleto}><ExternalLink size={13}/> Ver detalle completo</button>

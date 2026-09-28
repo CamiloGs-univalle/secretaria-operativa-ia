@@ -9,7 +9,7 @@ import {
   CheckSquare, Calendar, CalendarPlus, Users, Settings, Bot, Leaf, CornerUpLeft,
   Clock, ListChecks, Reply, Archive, Check, Send, AlertTriangle,
   MessageSquare, Plus, LayoutGrid, Building2,
-  X, GripVertical, BarChart3,
+  X, GripVertical, BarChart3, ExternalLink,
 } from 'lucide-react'
 import './App.css'
 import { fechaLocalISO, diasEntre } from './utils/dateUtils.js'
@@ -31,6 +31,7 @@ import { useAuthSession } from './hooks/useAuthSession.js'
 import { useConfiguracionPersistida } from './hooks/useConfiguracionPersistida.js'
 import { useCorreosYProcesos } from './hooks/useCorreosYProcesos.js'
 import { useAsistenteChat } from './hooks/useAsistenteChat.js'
+import { useGoogleCalendar } from './hooks/useGoogleCalendar.js'
 
 // Íconos lineales únicos (Lucide, sección 42 de la especificación) para cada
 // pestaña del sidebar — reemplazan los emoji sueltos que usaba cada quien a
@@ -90,6 +91,9 @@ export default function App(){
   } = useCorreosYProcesos({ session, showToast, gmailConectado, setGmailConectado, archivados, setArchivados, sel, setSel, tab, setTab, setInboxFiltro, filtro, inboxFiltro, procesos, setProcesos })
 
   const { chatOpen, setChatOpen, chatInput, setChatInput, chatMessages, setChatMessages, chatEnviando, enviarPreguntaChat } = useAsistenteChat({ procesos, seguimientosFlat, showToast, sel, setSel, setRecordatoriosGenerales })
+
+  // Google Calendar real (Composio): estado de conexión + eventos del mes visible.
+  const { gcal, gcalEventos, gcalCargando, gcalError, gcalCreando, conectarCalendar, desconectarCalendar, recargarCalendar, enviarTareaACalendar } = useGoogleCalendar({ session, calMes, showToast, refresh })
 
   // --- Fila de correo estilo mockup — un solo componente usado tanto en el
   // resumen "Bandeja inteligente" de Inicio como en la pestaña dedicada, así
@@ -586,6 +590,9 @@ export default function App(){
                   onMarcarListo={()=>{ marcarProcesoListo(taskModal.proceso.id); setTaskModal(null) }}
                   onEliminar={taskModal.proceso.origen==='manual' ? ()=>{ eliminarTareaManual(taskModal.proceso.id); setTaskModal(null) } : null}
                   onVerDetalleCompleto={()=>{ setSel(taskModal.proceso); setProcesosVista('tabla'); setTaskModal(null) }}
+                  calendarConectado={gcal.connected}
+                  enviandoCalendar={gcalCreando===taskModal.proceso.id}
+                  onEnviarCalendar={async(hora)=>{ const r = await enviarTareaACalendar(taskModal.proceso, {hora}); if(r) setTaskModal(m=> m?{...m, proceso:{...m.proceso, gcalEventId:r.id||'creado', gcalEnlace:r.enlace||null}}:m) }}
                 />
               ) : (
                 <TaskCreateModal onClose={()=>setTaskModal(null)} onCreate={(datos)=>{ crearTareaManual(datos); setTaskModal(null) }} />
@@ -703,6 +710,7 @@ export default function App(){
             const eventos = [
               ...procesos.filter(p=>!['COMPLETADO','CERRADO','CANCELADO'].includes(p.estado) && p.fechaLimite).map(p=>({fecha:p.fechaLimite, tipo:'Vence', titulo:p.titulo, id:p.id, color: p.prioridad==='CRITICA'?'red':p.prioridad==='ALTA'?'orange':'blue'})),
               ...seguimientosFlat.filter(s=>!['COMPLETADO','CANCELADO'].includes(s.estado) && s.fecha).map(s=>({fecha:s.fecha, tipo:'Seguimiento', titulo:s.titulo, id:s.procesoId, color:'green'})),
+              ...gcalEventos.map(e=>({fecha:e.fecha, tipo:`Google Calendar${e.hora?` · ${e.hora}`:' · todo el día'}${e.lugar?` · ${e.lugar}`:''}`, titulo:e.titulo, id:null, enlace:e.enlace, color:'gcal', hora:e.hora})),
             ]
             const porFecha={}
             eventos.forEach(e=>{ (porFecha[e.fecha]=porFecha[e.fecha]||[]).push(e) })
@@ -729,9 +737,20 @@ export default function App(){
                     <b style={{fontSize:13,textTransform:'capitalize',minWidth:150,textAlign:'center'}}>{nombreMes}</b>
                     <button className="btn sm ghost" onClick={()=>setCalMes(({y,m})=> m===11?{y:y+1,m:0}:{y,m:m+1})}><ChevronRight size={14}/></button>
                     <button className="btn sm" onClick={()=>{const d=new Date(); setCalMes({y:d.getFullYear(),m:d.getMonth()}); setCalDiaSel(fechaLocalISO())}}>Hoy</button>
+                    {gcal.connected
+                      ? <button className="btn sm ghost" disabled={gcalCargando} onClick={recargarCalendar}><RefreshCw size={13}/> {gcalCargando?'Cargando…':'Actualizar'}</button>
+                      : gcal.configured && gcal.gmail && <button className="btn sm primary" onClick={conectarCalendar}><Calendar size={13}/> Conectar Google Calendar</button>}
                   </div>
                 </div>
-                <div style={{fontSize:11,color:'var(--muted)',padding:'0 18px 12px'}}>Vencimientos de tus tareas y seguimientos reales — la conexión con Google Calendar (para reuniones) está a cargo de OpenCode, ver <b>COORDINACION-AGENTES.md</b>.</div>
+                <div style={{fontSize:11,color:'var(--muted)',padding:'0 18px 12px'}}>
+                  {gcal.connected
+                    ? <>Vencimientos y seguimientos de tus tareas + <span className="calendar-event gcal" style={{display:'inline',padding:'1px 5px'}}>tus eventos de Google Calendar</span>.</>
+                    : !session.real ? 'Vencimientos de tus tareas y seguimientos — en modo demostración no se conecta Google Calendar.'
+                    : !gcal.gmail ? 'Vencimientos de tus tareas y seguimientos — conecta primero tu Gmail real para poder conectar Google Calendar.'
+                    : !gcal.configured ? 'Vencimientos de tus tareas y seguimientos — Google Calendar aún no está configurado en el servidor.'
+                    : 'Vencimientos de tus tareas y seguimientos — conecta Google Calendar para ver también tus reuniones.'}
+                  {gcalError && <span style={{color:'var(--red)',display:'block',marginTop:4}}>⚠️ {gcalError}</span>}
+                </div>
                 <div className="calendar-grid calendar-weekdays">
                   {['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'].map(d=><div key={d} className="calendar-weekday">{d}</div>)}
                 </div>
@@ -753,13 +772,22 @@ export default function App(){
                 </div>
                 <div style={{padding:'16px 18px',borderTop:'1px solid var(--border)'}}>
                   <div style={{fontWeight:800,fontSize:12.5,marginBottom:10}}>{calDiaSel===fechaLocalISO()?'Hoy':calDiaSel} <span style={{color:'var(--muted)',fontWeight:600}}>— {eventosDelDia.length} evento{eventosDelDia.length===1?'':'s'}</span></div>
-                  {!eventosDelDia.length && <div style={{fontSize:12,color:'var(--muted)'}}>Sin vencimientos ni seguimientos este día.</div>}
-                  {eventosDelDia.map((e,i)=>(
-                    <div key={i} className="plan-row" role="button" tabIndex={0} style={{cursor:'pointer'}} onClick={()=>{const p=procesos.find(x=>x.id===e.id); if(p){setSel(p); setTab('procesos')}}}>
-                      <span className={`dot ${e.color}`}/>
-                      <div style={{flex:1}}><b>{e.titulo}</b><small style={{display:'block',color:'var(--muted)'}}>{e.tipo}</small></div>
-                    </div>
-                  ))}
+                  {!eventosDelDia.length && <div style={{fontSize:12,color:'var(--muted)'}}>Sin eventos este día.</div>}
+                  {eventosDelDia.map((e,i)=>{
+                    const p = e.id ? procesos.find(x=>x.id===e.id) : null
+                    return (
+                      <div key={i} className="plan-row" role="button" tabIndex={0} style={{cursor:'pointer'}} onClick={()=>{ if(e.enlace){ window.open(e.enlace,'_blank','noopener') } else if(p){setSel(p); setTab('procesos')} }}>
+                        <span className={`dot ${e.color}`}/>
+                        <div style={{flex:1}}><b>{e.titulo}</b><small style={{display:'block',color:'var(--muted)'}}>{e.tipo}</small></div>
+                        {e.enlace && <ExternalLink size={13} style={{color:'var(--muted)'}}/>}
+                        {p && e.tipo==='Vence' && gcal.connected && (
+                          p.gcalEventId
+                            ? <Pill color="green">En Calendar</Pill>
+                            : <button className="btn sm ghost" disabled={gcalCreando===p.id} onClick={ev=>{ev.stopPropagation(); enviarTareaACalendar(p)}}><CalendarPlus size={13}/> {gcalCreando===p.id?'Enviando…':'A Google Calendar'}</button>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )
@@ -817,8 +845,17 @@ export default function App(){
                   {gmailConectado ? <Pill color="green">Conectado</Pill> : session.firebase ? <button className="btn sm" onClick={()=>handleRealConnect({name:session.nombre, email:session.email})}>Conectar</button> : <Pill color="gray">Demo</Pill>}
                 </div>
                 <div className="integration-row">
-                  <div className="integration-info"><Calendar size={18}/><div><b>Google Calendar</b><span>Aún no conectado — por ahora el Calendario se arma con tus tareas y seguimientos reales</span></div></div>
-                  <Pill color="gray">No disponible</Pill>
+                  <div className="integration-info"><Calendar size={18}/><div><b>Google Calendar</b><span>{
+                    gcal.connected ? 'Conectado — tus reuniones aparecen en Calendario y puedes enviar vencimientos de tareas'
+                    : !session.real ? 'No disponible en modo demostración'
+                    : !gcal.configured ? 'Falta configurarlo en el servidor (COMPOSIO_GCAL_AUTH_CONFIG_ID)'
+                    : !gcal.gmail ? 'Conecta primero tu Gmail real'
+                    : 'Sin conectar — conéctalo para ver tus reuniones en el Calendario'
+                  }</span></div></div>
+                  {gcal.connected
+                    ? <div style={{display:'flex',gap:6,alignItems:'center'}}><Pill color="green">Conectado</Pill><button className="btn sm ghost" onClick={desconectarCalendar}>Desconectar</button></div>
+                    : gcal.configured && gcal.gmail ? <button className="btn sm" onClick={conectarCalendar}>Conectar</button>
+                    : <Pill color="gray">No disponible</Pill>}
                 </div>
                 <div className="integration-row">
                   <div className="integration-info"><MessageSquare size={18}/><div><b>Slack</b><span>No hay integración con Slack en esta app todavía</span></div></div>

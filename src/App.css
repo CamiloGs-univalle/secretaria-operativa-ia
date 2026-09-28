@@ -438,6 +438,10 @@
 .calendar-event.orange{background:var(--orange-bg);color:var(--orange)}
 .calendar-event.blue{background:var(--accent-light);color:var(--accent)}
 .calendar-event.green{background:var(--green-bg);color:var(--green)}
+.calendar-event.gcal{background:rgba(139,92,246,.14);color:#7C3AED}
+.dot.gcal{background:#8B5CF6}
+[data-theme="dark"] .calendar-event.gcal{background:rgba(139,92,246,.24);color:#C4B5FD}
+.modal-calendar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:var(--text2);background:var(--bg2);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:12px}
 .calendar-event-more{font-size:9px;color:var(--muted);font-weight:700}
 @media (max-width:720px){.calendar-cell{min-height:56px}.calendar-event{display:none}.calendar-cell-events{display:none}}
 

@@ -1,6 +1,6 @@
 // Composio redirige aquí cuando la persona termina (o cancela) el
 // consentimiento de Gmail. Trae ?status=success|failed&connected_account_id=...
-import { parseCookies, setCookie, clearCookie, encrypt, COOKIE } from '../../_lib/session.js'
+import { parseCookies, setCookie, clearCookie, encrypt, decrypt, COOKIE } from '../../_lib/session.js'
 import { estadoConexion, emailDeCuentaConectada } from '../../_lib/composio.js'
 
 export default async function handler(req, res){
@@ -9,11 +9,17 @@ export default async function handler(req, res){
     const status = url.searchParams.get('status')
     const connectedAccountId = url.searchParams.get('connected_account_id') || url.searchParams.get('connectedAccountId')
     const cookies = parseCookies(req)
-    const pending = cookies[COOKIE.STATE] ? JSON.parse(cookies[COOKIE.STATE]) : null
+    // El estado va cifrado (ver start.js); si no descifra o expiró, se ignora.
+    const pending = cookies[COOKIE.STATE] ? decrypt(cookies[COOKIE.STATE]) : null
     clearCookie(res, COOKIE.STATE)
 
-    if(status !== 'success' || !pending || !connectedAccountId){
+    if(status !== 'success' || !pending || !connectedAccountId || !(pending.exp > Date.now())){
       res.writeHead(302, { Location: '/?login=cancelado' }); return res.end()
+    }
+    // El id que vuelve en la URL debe ser el mismo que Composio creó en start.js.
+    if(pending.caId && pending.caId !== connectedAccountId){
+      console.error('[auth/composio/callback] connected_account_id no coincide con el creado en start')
+      res.writeHead(302, { Location: '/?login=error' }); return res.end()
     }
 
     // Verificar contra Composio (nunca confiar solo en los query params que
@@ -21,6 +27,12 @@ export default async function handler(req, res){
     // activa antes de confiar en ella y emitir una sesión.
     const estado = await estadoConexion(connectedAccountId)
     const activa = estado.ok && /ACTIVE|CONNECTED|success/i.test(String(estado.status || ''))
+    const authConfig = estado.raw?.auth_config?.id || estado.raw?.auth_config_id
+    const dueno = estado.raw?.user_id
+    if(activa && ((authConfig && authConfig !== process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID) || (dueno && dueno !== pending.email))){
+      console.error('[auth/composio/callback] la cuenta no pertenece a este flujo:', authConfig, dueno)
+      res.writeHead(302, { Location: '/?login=error' }); return res.end()
+    }
     if(!activa){
       console.error('[auth/composio/callback] conexión no activa, no se emite sesión:', estado.status)
       res.writeHead(302, { Location: '/?login=error' }); return res.end()

@@ -21,13 +21,16 @@ function headers(){
 // Crea una sesión de autorización hospedada por Composio para que `userId`
 // (usamos su correo como identificador) conecte su Gmail. Devuelve la URL a
 // la que hay que redirigir al navegador.
-export async function crearEnlaceConexion({ userId, callbackUrl }){
+// authConfigId: por defecto el de Gmail; Google Calendar pasa el suyo
+// (COMPOSIO_GCAL_AUTH_CONFIG_ID) — en Composio cada toolkit es una conexión
+// distinta, con sus propios permisos.
+export async function crearEnlaceConexion({ userId, callbackUrl, authConfigId = process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID }){
   const r = await fetch(`${V3}/connected_accounts/link`, {
     method: 'POST',
     headers: headers(),
     body: JSON.stringify({
       user_id: userId,
-      auth_config_id: process.env.COMPOSIO_GMAIL_AUTH_CONFIG_ID,
+      auth_config_id: authConfigId,
       callback_url: callbackUrl
     })
   })
@@ -81,5 +84,23 @@ export async function ejecutarAccionGmail({ action, params, connectedAccountId, 
   })
   const j = await r.json().catch(()=>({}))
   if(!r.ok) throw new Error('composio_action_failed: ' + JSON.stringify(j))
+  return j
+}
+
+// Ejecuta cualquier herramienta de Composio (no solo Gmail) para una cuenta
+// conectada concreta. Sin normalizar parámetros: se mandan tal cual.
+export async function ejecutarAccion({ tool, args = {}, connectedAccountId, entityId }){
+  const payload = { arguments: args }
+  // connected_account_id ya identifica la cuenta sin ambigüedad; user_id
+  // solo se manda si no hay cuenta concreta.
+  if(connectedAccountId) payload.connected_account_id = connectedAccountId
+  else if(entityId) payload.user_id = entityId
+  const r = await fetch(`${V3}/tools/execute/${tool}`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify(payload)
+  })
+  const j = await r.json().catch(()=>({}))
+  if(!r.ok || j.successful === false) throw new Error('composio_action_failed: ' + (j.error || j.message || r.status))
   return j
 }
