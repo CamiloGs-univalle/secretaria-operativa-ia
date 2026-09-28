@@ -151,8 +151,15 @@ export function subscribeProcesosFirestore(cb, miEmail){
       const list = snap.docs.map(d=> d.data())
       saveProcesos(list)
       cb(list)
-    }, (err)=> console.warn('[Firestore] subscribe', err.message))
-  }catch(e){ console.warn(e); return ()=>{} }
+    }, (err)=> console.warn('[Firestore] subscribe', err?.message || err))
+  }catch(e){
+    console.warn('[Firestore] subscribe init', e)
+    // Si falla por índice faltante, avisar al usuario
+    if(e?.message?.includes('index') || e?.code === 'failed-precondition'){
+      console.error('[Firestore] Índice compuesto faltante. Créalo en: https://console.firebase.google.com/v1/r/project/gestor-12e9a/firestore/indexes?create_composite=Ck1wcm9qZWN0cy9nZXN0b3ItMTJlOWEvZGF0YWJhc2VzLyhkZWZhdWx0KS9jb2xsZWN0aW9uR3JvdXBzL3Byb2Nlc29zL2luZGV4ZXMvXxABGg8KC3Byb3BpZXRhcmlvEAEaEwoPdWx0aW1hQWN0aXZpZGFkEAIaDAoIX19uYW1lX18QAg')
+    }
+    return ()=>{}
+  }
 }
 
 export async function saveProcesoFirestore(proceso){
