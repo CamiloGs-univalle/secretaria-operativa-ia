@@ -794,3 +794,23 @@
   .cfg-tabs button.on span{display:inline}
   .cfg-nueva-etiqueta{flex-wrap:wrap}
 }
+
+/* ============ Layout de borde a borde (sin márgenes laterales) ============
+   Barra superior y menú lateral pegados a los bordes de la ventana; el
+   contenido usa todo el ancho disponible en cualquier tamaño de pantalla. */
+:root{--topbar-h:74px}
+.topbar{top:0;margin:0;border-radius:0;box-shadow:none;border-bottom:1px solid var(--border)}
+@media (min-width:901px){.topbar{height:var(--topbar-h);padding-top:0;padding-bottom:0;box-sizing:border-box}}
+.topbar-search{max-width:640px}
+.layout,.layout.con-asistente{max-width:none;margin:0;min-height:calc(100vh - var(--topbar-h))}
+.main{padding:20px 24px 80px}
+.cfg,.settings-wrap{max-width:none}
+@media (min-width:901px){
+  .sidebar{margin:0;border-radius:0;top:var(--topbar-h);height:calc(100vh - var(--topbar-h))}
+  .assistant-col{top:var(--topbar-h);height:calc(100vh - var(--topbar-h));padding:20px 20px 20px 0}
+}
+@media (max-width:900px){
+  .layout,.layout.con-asistente{padding:0}
+  .sidebar{margin:0;border-radius:0}
+  .main{padding:16px 14px 80px}
+}
