@@ -37,7 +37,6 @@ export default async function handler(req, res){
   if(!RE_EMAIL.test(to)) return res.status(400).json({ error:'Destinatario inválido' })
 
   // Action Guard: validar destinatario y requerir confirmación ya hecha en frontend
-  // Aquí se registra auditoría y valida que no sea envío masivo/automático sin permiso
   const allowed = true // en prod validar contra lista blanca / reglas
   if(!allowed) return res.status(403).json({error:'Action Guard bloqueó envío'})
 
@@ -66,14 +65,12 @@ export default async function handler(req, res){
     }
   }
 
-  // Las rutas 1) y 2) de abajo envían usando credenciales FIJAS del
-  // despliegue (el token OAuth de una sola cuenta, o la API key global de
-  // Composio) — no las de "quien está pidiendo el envío". Solo tienen
-  // sentido para la propia cuenta fija de Proservis, nunca para alguien más
-  // (aunque haya iniciado sesión de otra forma). Sin cuenta conectada
-  // propia, un envío real solo procede si la sesión ES la cuenta fija.
+  // Solo la cuenta FIJA del despliegue puede usar credenciales fijas.
+  // Cualquier otra sesión SIN connectedAccountId recibe error honesto.
   if(session?.real && session.email === 'auxiliar.ti@proservis.com.co'){
-    // 1) Intento Gmail API directo (preferido — usa token del usuario)
+    // NOTA: googleapis NO está instalado — este bloque está comentado.
+    // Para habilitar: npm install googleapis y configurar GOOGLE_CLIENT_ID/SECRET/REFRESH_TOKEN
+    /*
     const hasGoogle = process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_REFRESH_TOKEN
     if(hasGoogle){
       try{
@@ -90,8 +87,9 @@ export default async function handler(req, res){
         // fallback a Composio si falla
       }
     }
+    */
 
-    // 2) Fallback Composio (si hay COMPOSIO_API_KEY) — usa v3.1
+    // Fallback Composio (si hay COMPOSIO_API_KEY) — usa v3.1
     if(process.env.COMPOSIO_API_KEY){
       try{
         const tool = threadId ? 'GMAIL_REPLY_TO_THREAD' : 'GMAIL_SEND_EMAIL'
@@ -105,8 +103,8 @@ export default async function handler(req, res){
     }
   }
 
-  // 3) Sin sesión real conectada (o sin credenciales configuradas) —
-  // simular pero avisar, nunca usar las credenciales fijas para alguien
-  // que no conectó su propia cuenta.
-  return res.json({ ok:true, id:'sim-'+Date.now(), via:'simulado', warning:'Conecte su Gmail real para envío REAL. Por ahora queda registrado en auditoría.' })
+  // SIN sesión real conectada (ni cuenta fija) — error honesto, NUNCA simular.
+  return res.status(403).json({ error:'gmail_no_conectado', message:'Conecte su Gmail real para envío real. No se simulan envíos.' })
 }
+
+function sinCRLF(s){ return String(s || '').replace(/[\r\n]+/g, ' ').trim() }

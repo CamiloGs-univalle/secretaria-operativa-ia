@@ -3,19 +3,13 @@
 // a la pantalla de consentimiento hospedada por Composio.
 import { crearEnlaceConexion } from '../../_lib/composio.js'
 import { setCookie, getAppUrl, COOKIE } from '../../_lib/session.js'
+import crypto from 'crypto'
+import { defaultRateLimiter } from '../../_lib/rateLimiter.js'
 
-// Rate limit simple en memoria por IP — evita que este endpoint (que llama a
-// la API de Composio) sea usado para golpearla en bucle o para enumerar
-// direcciones de correo.
-const intentos = new Map()
-const RATE_MAX = 10
-const RATE_WINDOW_MS = 10 * 60 * 1000
-function rateLimited(ip){
-  const ahora = Date.now()
-  const lista = (intentos.get(ip) || []).filter(t => ahora - t < RATE_WINDOW_MS)
-  lista.push(ahora)
-  intentos.set(ip, lista)
-  return lista.length > RATE_MAX
+// Genera un nonce criptográfico seguro para el estado OAuth (state)
+// Previene CSRF en el flujo de Composio
+function generarStateNonce(){
+  return crypto.randomBytes(16).toString('hex')
 }
 
 export default async function handler(req, res){
@@ -34,19 +28,24 @@ export default async function handler(req, res){
     return
   }
   const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'anon'
-  if(rateLimited(ip)){ res.status(429).send('Demasiados intentos — espere unos minutos'); return }
+  if(defaultRateLimiter.isLimited(ip)){ res.status(429).send('Demasiados intentos — espere unos minutos'); return }
   const email = (req.query?.email || '').trim()
   const name = (req.query?.name || '').trim()
   if(!/^\S+@\S+\.\S+$/.test(email)){ res.status(400).send('Correo inválido'); return }
   try{
     const appUrl = getAppUrl(req)
+    const stateNonce = crypto.randomBytes(16).toString('hex')
     const { redirectUrl } = await crearEnlaceConexion({
       userId: email,
-      callbackUrl: `${appUrl}/api/auth/composio/callback`
+      callbackUrl: `${getAppUrl(req)}/api/auth/composio/callback`,
+      state: stateNonce
     })
-    // Guardamos quién está intentando conectar, para leerlo de vuelta en el callback
-    setCookie(res, COOKIE.STATE, JSON.stringify({ email, name }), { maxAge: 600 })
-    res.writeHead(302, { Location: redirectUrl })
+    // Guardamos quién está intentando conectar + el nonce, para validar en callback
+    setCookie(res, COOKIE.STATE, JSON.stringify({ email, name, stateNonce }), { maxAge: 600 })
+    // Agregamos el state a la URL de redirección (Composio lo devuelve en el callback)
+    const url = new URL(redirectUrl)
+    url.searchParams.set('state', stateNonce)
+    res.writeHead(302, { Location: url.toString() })
     res.end()
   }catch(e){
     console.error('[auth/composio/start]', e)

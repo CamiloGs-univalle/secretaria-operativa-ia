@@ -156,25 +156,37 @@ export function subscribeProcesosFirestore(cb, miEmail){
 }
 
 export async function saveProcesoFirestore(proceso){
-  if(!isFirebaseMode()) return
-  try{ await setDoc(doc(db, 'procesos', proceso.id), proceso, { merge:true }) }catch(e){ console.warn(e.message) }
+  if(!isFirebaseMode()) return { ok:false, reason:'no_firebase' }
+  try{ 
+    await setDoc(doc(db, 'procesos', proceso.id), proceso, { merge:true })
+    return { ok:true }
+  }catch(e){ 
+    console.error('[Firestore] saveProcesoFirestore', e.message)
+    return { ok:false, error:e.message }
+  }
 }
 
-export function updateProceso(id, patch){
+export async function updateProceso(id, patch){
   const list=loadProcesos()
   const i=list.findIndex(p=>p.id===id)
   if(i>=0){
     list[i]={...list[i], ...patch, ultimaActividad:new Date().toISOString()}
     saveProcesos(list)
-    // Firestore async (no bloquea UI) — cualquier correo lo ve
-    if(isFirebaseMode()) saveProcesoFirestore(list[i])
+    // Firestore: await write + handle error
+    if(isFirebaseMode()){
+      const result = await saveProcesoFirestore(list[i])
+      if(!result.ok) console.error('[Firestore] update failed:', result.error)
+    }
     return list[i]
   }
   return null
 }
-export function addProceso(p){
+export async function addProceso(p){
   const list=loadProcesos(); list.unshift(p); saveProcesos(list)
-  if(isFirebaseMode()) saveProcesoFirestore(p)
+  if(isFirebaseMode()){
+    const result = await saveProcesoFirestore(p)
+    if(!result.ok) console.error('[Firestore] add failed:', result.error)
+  }
   return p
 }
 export function resetMock(){ localStorage.removeItem(keyProcesos()); return [] }

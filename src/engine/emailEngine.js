@@ -82,14 +82,31 @@ export function detectarFechas(email){
   let esFechaLimite=false
   if(fechaTexto){
     const lower=fechaTexto.toLowerCase()
+    // Fecha LOCAL (Colombia, UTC-5) — new Date() sin parámetros usa zona local
     const hoy=new Date()
-    if(lower.includes('mañana') && !lower.includes('pasado')) { const d=new Date(hoy); d.setDate(hoy.getDate()+1); fechaCalculada=d.toISOString().slice(0,10); esFechaLimite=/necesitamos|antes|entregar|enviar/i.test(body) }
-    else if(lower.includes('pasado mañana')){ const d=new Date(hoy); d.setDate(hoy.getDate()+2); fechaCalculada=d.toISOString().slice(0,10) }
-    else if(lower.includes('hoy')) fechaCalculada=hoy.toISOString().slice(0,10)
+    const y=hoy.getFullYear(), m=hoy.getMonth(), d=hoy.getDate()
+    if(lower.includes('mañana') && !lower.includes('pasado')) { 
+      const d=new Date(y, m, d+1); 
+      fechaCalculada=d.toISOString().slice(0,10); 
+      esFechaLimite=/necesitamos|antes|entregar|enviar/i.test(body) 
+    }
+    else if(lower.includes('pasado mañana')){ 
+      const d=new Date(y, m, d+2); 
+      fechaCalculada=d.toISOString().slice(0,10) 
+    }
+    else if(lower.includes('hoy')) { 
+      const d=new Date(y, m, d); 
+      fechaCalculada=d.toISOString().slice(0,10) 
+    }
     else if(/lunes|martes|miércoles|jueves|viernes/i.test(lower)){
       const dias={lunes:1,martes:2,'miércoles':3,miercoles:3,jueves:4,viernes:5}
       const target=dias[lower.replace('el ','').trim()]
-      if(target){ const d=new Date(hoy); const diff=(target - d.getDay() +7)%7 ||7; d.setDate(d.getDate()+diff); fechaCalculada=d.toISOString().slice(0,10)}
+      if(target){
+        const d=new Date(y, m, d)
+        const diff=(target - d.getDay() + 7) % 7 || 7
+        d.setDate(d.getDate() + diff)
+        fechaCalculada=d.toISOString().slice(0,10)
+      }
     }
   }
   // horas

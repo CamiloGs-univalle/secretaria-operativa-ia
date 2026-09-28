@@ -1,6 +1,15 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Helper: solo cuentas @proservis.com.co pueden acceder
+    function esCuentaProservis() {
+      return request.auth != null
+        && request.auth.token.email.matches('.*@proservis\\.com\\.co$');
+    }
+    // Helper: el documento pertenece al usuario autenticado
+    function esPropietario(data) {
+      return data.propietario == request.auth.token.email;
+    }
     // Cada proceso pertenece a la persona que lo generó (campo `propietario`,
     // su correo). Antes cualquier persona autenticada podía leer TODOS los
     // procesos de las 4 personas que usan la app — el filtro por dueño que
@@ -10,30 +19,30 @@ service cloud.firestore {
     // misma exige que el proceso sea del correo autenticado — la separación
     // es real, no solo visual.
     match /procesos/{docId} {
-      allow read: if request.auth != null && resource.data.propietario == request.auth.token.email;
-      allow create: if request.auth != null
+      allow read: if esCuentaProservis() && esPropietario(resource.data);
+      allow create: if esCuentaProservis()
         && request.resource.data.propietario == request.auth.token.email
         && request.resource.data.prioridad in ['CRITICA','ALTA','MEDIA','BAJA','INFORMATIVA']
         && request.resource.data.estado in ['NUEVO','CLASIFICADO','PENDIENTE','EN_PROCESO','ESPERANDO','SEGUIMIENTO','COMPLETADO','CERRADO','BLOQUEADO','VENCIDO','REPROGRAMADO','CANCELADO','CON_INCIDENCIA'];
-      allow update: if request.auth != null
+      allow update: if esCuentaProservis()
         && resource.data.propietario == request.auth.token.email
         && request.resource.data.propietario == request.auth.token.email
         && request.resource.data.prioridad in ['CRITICA','ALTA','MEDIA','BAJA','INFORMATIVA'];
-      allow delete: if request.auth != null && resource.data.propietario == request.auth.token.email;
+      allow delete: if esCuentaProservis() && esPropietario(resource.data);
     }
     match /correos/{docId} {
-      allow read, write: if request.auth != null;
+      allow read, write: if esCuentaProservis();
     }
     match /auditoria/{docId} {
-      allow read: if request.auth != null;
-      allow create: if request.auth != null;
+      allow read: if esCuentaProservis();
+      allow create: if esCuentaProservis();
       allow update, delete: if false; // auditoría inmutable
     }
     match /usuarios/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if esCuentaProservis() && request.auth.uid == userId;
     }
     match /config/{docId} {
-      allow read: if request.auth != null;
+      allow read: if esCuentaProservis();
       allow write: if false; // solo admin via console
     }
   }
